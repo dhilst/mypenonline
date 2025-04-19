@@ -36,6 +36,7 @@
         <li><b>Zoom</b>: Hold 'N' and drag up/down with mouse/pen.</li>
         <li><b>Undo</b>: Ctrl+Z (undoes last stroke).</li>
         <li><b>Select & Transform</b>: Hold Space to enter selection mode. Hold mouse1 to draw a rectangle and select strokes. Drag with mouse1 to move, drag bottom-right handle to resize. Release Space to exit.</li>
+        <li><b>Deselect</b>: Press Esc to deselect all strokes. Selected strokes remain active after releasing Space.</li>
         <li><b>Colors</b>: Use keybinds 1-9 to select colors:
           <ul>
             <li>1: White</li>
@@ -206,6 +207,11 @@
         } else if (e.key >= '1' && e.key <= '9') {
           const index = parseInt(e.key) - 1;
           selectColor(defaultColors[index]);
+        } else if (e.key === 'Escape') {
+          selectedStrokeIndices = [];
+          isDragging = false;
+          isResizing = false;
+          redrawCanvas();
         }
       });
 
@@ -224,7 +230,6 @@
           isDrawingSelection = false;
           isDragging = false;
           isResizing = false;
-          selectedStrokeIndices = [];
           canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
           redrawCanvas();
         }
@@ -251,6 +256,16 @@
             selectEndY = e.offsetY;
             selectedStrokeIndices = [];
           }
+        } else if (!isSelecting && e.button === 0 && selectedStrokeIndices.length > 0) {
+          if (isPointNearResizeHandle(e.offsetX, e.offsetY)) {
+            isResizing = true;
+            resizeStartX = e.offsetX;
+            resizeStartY = e.offsetY;
+          } else if (isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+            isDragging = true;
+            dragStartX = e.offsetX;
+            dragStartY = e.offsetY;
+          }
         } else if (e.button === 0 && isMKeyPressed) {
           isPanning = true;
           lastPanX = e.clientX;
@@ -259,17 +274,20 @@
           isZooming = true;
           lastPanY = e.clientY;
         } else if (e.button === 0) {
-          isDrawing = true;
-          const adjustedX = (e.offsetX - offsetX) / scale;
-          const adjustedY = (e.offsetY - offsetY) / scale;
-          currentStroke = [{
-            x: adjustedX,
-            y: adjustedY,
-            pressure: e.pointerType === 'pen' ? (e.pressure || 1) : 1,
-            color: ctx.strokeStyle,
-            lineWidth: brushSize.value
-          }];
-          console.log('Start stroke:', currentStroke[0]);
+          // Only start drawing if not clicking on selected strokes
+          if (!isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+            isDrawing = true;
+            const adjustedX = (e.offsetX - offsetX) / scale;
+            const adjustedY = (e.offsetY - offsetY) / scale;
+            currentStroke = [{
+              x: adjustedX,
+              y: adjustedY,
+              pressure: e.pointerType === 'pen' ? (e.pressure || 1) : 1,
+              color: ctx.strokeStyle,
+              lineWidth: brushSize.value
+            }];
+            console.log('Start stroke:', currentStroke[0]);
+          }
         } else if (e.button === 2) {
           isErasing = true;
           canvas.style.cursor = 'default';
@@ -358,6 +376,16 @@
         } else if (isErasing) {
           eraseStroke(e.offsetX, e.offsetY);
         } else if (isSelecting && selectedStrokeIndices.length > 0) {
+          // Cursor feedback in selection mode
+          if (isPointNearResizeHandle(e.offsetX, e.offsetY)) {
+            canvas.style.cursor = 'se-resize';
+          } else if (isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+            canvas.style.cursor = 'move';
+          } else {
+            canvas.style.cursor = 'crosshair';
+          }
+        } else if (selectedStrokeIndices.length > 0) {
+          // Cursor feedback outside selection mode
           if (isPointNearResizeHandle(e.offsetX, e.offsetY)) {
             canvas.style.cursor = 'se-resize';
           } else if (isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
@@ -420,7 +448,7 @@
       function draw(x, y, pressure) {
         const lastPoint = currentStroke[currentStroke.length - 2] || currentStroke[0];
         ctx.beginPath();
-        ctx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
+        ctx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetX);
         ctx.lineTo(x, y);
         ctx.lineWidth = brushSize.value * pressure * scale;
         ctx.stroke();
