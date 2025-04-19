@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full-Screen Draw with Colors, Eraser, Pan, Zoom, and Help</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #drawingCanvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        background-color: #15202B; /* Twitter dark theme */
+        cursor: crosshair;
+      }
+      #controls {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 10;
+        background: rgba(21, 32, 43, 0.9);
+        padding: 8px 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      #controls button {
+        background: #D3D8DE;
+        color: #15202B;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s, transform 0.1s;
+      }
+      #controls button:hover {
+        background: #E8ECEF;
+        transform: translateY(-1px);
+      }
+      #controls button:active {
+        transform: translateY(0);
+      }
+      #controls label {
+        color: #D3D8DE;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      #controls input[type="color"] {
+        width: 30px;
+        height: 30px;
+        padding: 2px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      #controls input[type="range"] {
+        accent-color: #D3D8DE;
+      }
+      #controls input[type="file"] {
+        display: none;
+      }
+      #colorButtons {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .colorButton {
+        width: 24px;
+        height: 24px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: transform 0.1s;
+      }
+      .colorButton:hover {
+        transform: scale(1.1);
+      }
+      #helpPanel {
+        display: none;
+        position: fixed;
+        top: 60px;
+        left: 10px;
+        z-index: 11;
+        background: rgba(21, 32, 43, 0.95);
+        color: #D3D8DE;
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        max-width: 300px;
+        font-size: 14px;
+      }
+      #helpPanel h3 {
+        margin: 0 0 10px;
+        color: #D3D8DE;
+        font-size: 16px;
+      }
+      #helpPanel ul {
+        margin: 0;
+        padding-left: 20px;
+      }
+      #helpPanel button {
+        background: #D3D8DE;
+        color: #15202B;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s, transform 0.1s;
+      }
+      #helpPanel button:hover {
+        background: #E8ECEF;
+        transform: translateY(-1px);
+      }
+      #helpPanel button:active {
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <button onclick="clearCanvas()">Clear All</button>
+      <button onclick="saveCanvas()">Save</button>
+      <button onclick="document.getElementById('fileInput').click()">Load</button>
+      <input type="file" id="fileInput" accept=".zip" style="display: none;">
+      <button onclick="toggleHelp()">Help</button>
+      <label>Color: <input type="color" id="colorPicker" value="#FFFFFF"></label>
+      <div id="colorButtons">
+        <button class="colorButton" style="background: #FFFFFF;" onclick="selectColor('#FFFFFF')"></button>
+        <button class="colorButton" style="background: #FF0000;" onclick="selectColor('#FF0000')"></button>
+        <button class="colorButton" style="background: #00FF00;" onclick="selectColor('#00FF00')"></button>
+        <button class="colorButton" style="background: #0000FF;" onclick="selectColor('#0000FF')"></button>
+        <button class="colorButton" style="background: #FFFF00;" onclick="selectColor('#FFFF00')"></button>
+        <button class="colorButton" style="background: #800080;" onclick="selectColor('#800080')"></button>
+        <button class="colorButton" style="background: #FFA500;" onclick="selectColor('#FFA500')"></button>
+        <button class="colorButton" style="background: #00FFFF;" onclick="selectColor('#00FFFF')"></button>
+        <button class="colorButton" style="background: #FF00FF;" onclick="selectColor('#FF00FF')"></button>
+      </div>
+      <label>Brush Size: <input type="range" id="brushSize" min="1" max="20" value="5"></label>
+    </div>
+    <div id="helpPanel">
+      <h3>Controls</h3>
+      <ul>
+        <li><b>Draw</b>: Left-click or use stylus (pressure-sensitive).</li>
+        <li><b>Erase</b>: Hold right-click to erase strokes.</li>
+        <li><b>Pan</b>: Hold 'M' and drag with mouse/pen.</li>
+        <li><b>Zoom</b>: Hold 'N' and drag up/down with mouse/pen.</li>
+        <li><b>Undo</b>: Ctrl+Z (undoes last stroke).</li>
+        <li><b>Colors</b>: Use keybinds 1-9 to select colors:
+          <ul>
+            <li>1: White</li>
+            <li>2: Red</li>
+            <li>3: Green</li>
+            <li>4: Blue</li>
+            <li>5: Yellow</li>
+            <li>6: Purple</li>
+            <li>7: Orange</li>
+            <li>8: Cyan</li>
+            <li>9: Magenta</li>
+          </ul>
+        </li>
+        <li><b>Save</b>: Click "Save" to name and download strokes as a .json.zip file.</li>
+        <li><b>Load</b>: Click "Load" to upload a .json.zip file and restore strokes.</li>
+        <li><b>Clear All</b>: Click "Clear All" button.</li>
+        <li><b>Color</b>: Use color picker or default color buttons.</li>
+        <li><b>Brush Size</b>: Adjust slider (1-20).</li>
+      </ul>
+      <button onclick="toggleHelp()">Close</button>
+    </div>
+    <canvas id="drawingCanvas"></canvas>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script>
+      const canvas = document.getElementById('drawingCanvas');
+      const ctx = canvas.getContext('2d');
+      const colorPicker = document.getElementById('colorPicker');
+      const brushSize = document.getElementById('brushSize');
+      const helpPanel = document.getElementById('helpPanel');
+      const fileInput = document.getElementById('fileInput');
+
+      // Set canvas to full screen
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // Panning, zooming, and erasing variables
+      let isPanning = false;
+      let isZooming = false;
+      let isErasing = false;
+      let isMKeyPressed = false;
+      let isNKeyPressed = false;
+      let lastPanX = 0;
+      let lastPanY = 0;
+      let offsetX = 0;
+      let offsetY = 0;
+      let scale = 1;
+      const minScale = 0.1;
+      const maxScale = 10;
+
+      // Default colors for keybinds
+      const defaultColors = [
+        '#FFFFFF', // 1: White
+        '#FF0000', // 2: Red
+        '#00FF00', // 3: Green
+        '#0000FF', // 4: Blue
+        '#FFFF00', // 5: Yellow
+        '#800080', // 6: Purple
+        '#FFA500', // 7: Orange
+        '#00FFFF', // 8: Cyan
+        '#FF00FF'  // 9: Magenta
+      ];
+
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        ctx.putImageData(imgData, 0, 0);
+        updateCanvasStyles();
+        redrawCanvas();
+      });
+
+      let isDrawing = false;
+      let currentStroke = [];
+      let strokeHistory = [];
+
+      // Set initial drawing styles
+      function updateCanvasStyles() {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = colorPicker.value;
+        ctx.lineWidth = brushSize.value;
+      }
+      updateCanvasStyles();
+
+      // Update styles when controls change
+      colorPicker.addEventListener('change', () => {
+        ctx.strokeStyle = colorPicker.value;
+      });
+
+      brushSize.addEventListener('input', () => {
+        ctx.lineWidth = brushSize.value;
+      });
+
+      // Select color from buttons or keybinds
+      function selectColor(color) {
+        colorPicker.value = color;
+        ctx.strokeStyle = color;
+      }
+
+      // Handle 'M', 'N', and number keybinds
+      document.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'm') {
+          isMKeyPressed = true;
+          canvas.style.cursor = 'move';
+        } else if (e.key.toLowerCase() === 'n') {
+          isNKeyPressed = true;
+          canvas.style.cursor = 'ns-resize';
+        } else if (e.ctrlKey && e.key === 'z') {
+          e.preventDefault();
+          undoLastStroke();
+        } else if (e.key >= '1' && e.key <= '9') {
+          const index = parseInt(e.key) - 1;
+          selectColor(defaultColors[index]);
+        }
+      });
+
+      document.addEventListener('keyup', (e) => {
+        if (e.key.toLowerCase() === 'm') {
+          isMKeyPressed = false;
+          isPanning = false;
+          canvas.style.cursor = isErasing ? 'default' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+        } else if (e.key.toLowerCase() === 'n') {
+          isNKeyPressed = false;
+          isZooming = false;
+          canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : 'crosshair';
+        }
+      });
+
+      // Handle pointer events
+      canvas.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        console.log('Pointer down:', e.pointerType, e.button, e.offsetX, e.offsetY, e.pressure);
+        if (e.button === 0 && isMKeyPressed) {
+          isPanning = true;
+          lastPanX = e.clientX;
+          lastPanY = e.clientY;
+        } else if (e.button === 0 && isNKeyPressed) {
+          isZooming = true;
+          lastPanY = e.clientY;
+        } else if (e.button === 0) {
+          isDrawing = true;
+          const adjustedX = (e.offsetX - offsetX) / scale;
+          const adjustedY = (e.offsetY - offsetY) / scale;
+          currentStroke = [{
+            x: adjustedX,
+            y: adjustedY,
+            pressure: e.pointerType === 'pen' ? (e.pressure || 1) : 1,
+            color: ctx.strokeStyle,
+            lineWidth: brushSize.value
+          }];
+          console.log('Start stroke:', currentStroke[0]);
+        } else if (e.button === 2) {
+          isErasing = true;
+          canvas.style.cursor = 'default';
+          eraseStroke(e.offsetX, e.offsetY);
+        }
+      });
+
+      canvas.addEventListener('pointermove', (e) => {
+        if (isPanning) {
+          const deltaX = e.clientX - lastPanX;
+          const deltaY = e.clientY - lastPanY;
+          offsetX += deltaX;
+          offsetY += deltaY;
+          lastPanX = e.clientX;
+          lastPanY = e.clientY;
+          redrawCanvas();
+        } else if (isZooming) {
+          const deltaY = e.clientY - lastPanY;
+          const scaleFactor = 1 - deltaY * 0.005;
+          const newScale = scale * scaleFactor;
+          if (newScale >= minScale && newScale <= maxScale) {
+            scale = newScale;
+            redrawCanvas();
+          }
+          lastPanY = e.clientY;
+        } else if (isDrawing) {
+          const pressure = e.pointerType === 'pen' ? (e.pressure || 1) : 1;
+          const adjustedX = (e.offsetX - offsetX) / scale;
+          const adjustedY = (e.offsetY - offsetY) / scale;
+          const point = {
+            x: adjustedX,
+            y: adjustedY,
+            pressure: pressure,
+            color: ctx.strokeStyle,
+            lineWidth: brushSize.value
+          };
+          currentStroke.push(point);
+          draw(e.offsetX, e.offsetY, pressure);
+          console.log('Drawing:', point, 'Pressure:', pressure);
+        } else if (isErasing) {
+          eraseStroke(e.offsetX, e.offsetY);
+        }
+      });
+
+      canvas.addEventListener('pointerup', () => {
+        if (isDrawing) {
+          isDrawing = false;
+          if (currentStroke.length > 1) {
+            strokeHistory.push(currentStroke);
+          }
+          currentStroke = [];
+          console.log('End stroke, history length:', strokeHistory.length);
+        }
+        if (isErasing) {
+          isErasing = false;
+          canvas.style.cursor = isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+        }
+        isPanning = false;
+        isZooming = false;
+      });
+
+      canvas.addEventListener('pointerleave', () => {
+        isDrawing = false;
+        isPanning = false;
+        isZooming = false;
+        if (isErasing) {
+          isErasing = false;
+          canvas.style.cursor = 'crosshair';
+        }
+      });
+
+      // Prevent right-click context menu
+      canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+      });
+
+      function draw(x, y, pressure) {
+        const lastPoint = currentStroke[currentStroke.length - 2] || currentStroke[0];
+        ctx.beginPath();
+        ctx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
+        ctx.lineTo(x, y);
+        ctx.lineWidth = brushSize.value * pressure * scale;
+        ctx.stroke();
+      }
+
+      function eraseStroke(x, y) {
+        const clickX = (x - offsetX) / scale;
+        const clickY = (y - offsetY) / scale;
+        let closestStrokeIndex = -1;
+        let minDistance = Infinity;
+
+        strokeHistory.forEach((stroke, index) => {
+          for (const point of stroke) {
+            const dx = point.x - clickX;
+            const dy = point.y - clickY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < minDistance && distance < 20 / scale) {
+              minDistance = distance;
+              closestStrokeIndex = index;
+            }
+          }
+        });
+
+        if (closestStrokeIndex !== -1) {
+          strokeHistory.splice(closestStrokeIndex, 1);
+          redrawCanvas();
+        }
+      }
+
+      function undoLastStroke() {
+        if (strokeHistory.length > 0) {
+          strokeHistory.pop();
+          redrawCanvas();
+        }
+      }
+
+      function redrawCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+        strokeHistory.forEach(stroke => {
+          if (stroke.length < 2) return;
+          ctx.strokeStyle = stroke[0].color;
+          ctx.beginPath();
+          ctx.moveTo(stroke[0].x, stroke[0].y);
+          for (let i = 1; i < stroke.length; i++) {
+            ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure;
+            ctx.lineTo(stroke[i].x, stroke[i].y);
+            ctx.stroke();
+          }
+        });
+        ctx.restore();
+        updateCanvasStyles();
+      }
+
+      function clearCanvas() {
+        strokeHistory = [];
+        currentStroke = [];
+        offsetX = 0;
+        offsetY = 0;
+        scale = 1;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      function saveCanvas() {
+        let fileName = window.prompt('Enter file name for your drawing:', 'drawing');
+        if (fileName === null) return; // User canceled
+        fileName = fileName.trim() || 'drawing'; // Default if empty
+        // Sanitize filename: remove invalid characters
+        fileName = fileName.replace(/[<>:"/\\|?*]+/g, '').replace(/\s+/g, '_');
+
+        const jsonData = JSON.stringify(strokeHistory);
+        const zip = new JSZip();
+        zip.file('drawing.json', jsonData);
+        zip.generateAsync({ type: 'blob' }).then((content) => {
+          saveAs(content, `${fileName}.json.zip`);
+        }).catch((err) => {
+          console.error('Error creating ZIP file:', err);
+          alert('Failed to save the file. Please try again.');
+        });
+      }
+
+      function loadCanvas() {
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const fileContent = e.target.result;
+          if (!file.name.toLowerCase().endsWith('.zip')) {
+            alert('Please select a .json.zip file.');
+            return;
+          }
+
+          JSZip.loadAsync(fileContent).then((zip) => {
+            return zip.file('drawing.json')?.async('string');
+          }).then((jsonText) => {
+            if (!jsonText) throw new Error('No drawing.json found in ZIP');
+            strokeHistory = JSON.parse(jsonText);
+            if (!Array.isArray(strokeHistory)) throw new Error('Invalid JSON format');
+            redrawCanvas();
+          }).catch((err) => {
+            console.error('Error loading ZIP or JSON:', err);
+            alert('Failed to load file. Ensure it contains a valid drawing.json.');
+          });
+        };
+
+        reader.onerror = function() {
+          console.error('Error reading file:', reader.error);
+          alert('Failed to read the file. Please try again.');
+        };
+
+        reader.readAsArrayBuffer(file);
+        fileInput.value = ''; // Reset input for next selection
+      }
+
+      fileInput.addEventListener('change', loadCanvas);
+
+      function toggleHelp() {
+        helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
+      }
+    </script>
+  </body>
+</html>
