@@ -157,6 +157,7 @@
         <li><b>Pan</b>: Hold 'M' and drag with mouse/pen.</li>
         <li><b>Zoom</b>: Hold 'N' and drag up/down with mouse/pen.</li>
         <li><b>Undo</b>: Ctrl+Z (undoes last stroke).</li>
+        <li><b>Select & Move</b>: Hold Space to enter selection mode. Hold mouse1 to draw a rectangle and select strokes. Drag with mouse1 to move selected strokes, release to drop. Release Space to exit.</li>
         <li><b>Colors</b>: Use keybinds 1-9 to select colors:
           <ul>
             <li>1: White</li>
@@ -194,12 +195,16 @@
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
 
-      // Panning, zooming, and erasing variables
+      // Panning, zooming, erasing, and selecting variables
       let isPanning = false;
       let isZooming = false;
       let isErasing = false;
+      let isSelecting = false;
+      let isDrawingSelection = false;
+      let isDragging = false;
       let isMKeyPressed = false;
       let isNKeyPressed = false;
+      let isSpacePressed = false;
       let lastPanX = 0;
       let lastPanY = 0;
       let offsetX = 0;
@@ -207,6 +212,14 @@
       let scale = 1;
       const minScale = 0.1;
       const maxScale = 10;
+      let selectStartX = 0;
+      let selectStartY = 0;
+      let selectEndX = 0;
+      let selectEndY = 0;
+      let selectedStrokeIndices = [];
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let strokeBounds = []; // Array of {minX, maxX, minY, maxY} for each stroke
 
       // Default colors for keybinds
       const defaultColors = [
@@ -259,7 +272,23 @@
         ctx.strokeStyle = color;
       }
 
-      // Handle 'M', 'N', and number keybinds
+      // Compute bounding box for a stroke
+      function computeStrokeBounds(stroke) {
+        if (stroke.length === 0) return null;
+        let minX = stroke[0].x;
+        let maxX = stroke[0].x;
+        let minY = stroke[0].y;
+        let maxY = stroke[0].y;
+        for (const point of stroke) {
+          minX = Math.min(minX, point.x);
+          maxX = Math.max(maxX, point.x);
+          minY = Math.min(minY, point.y);
+          maxY = Math.max(maxY, point.y);
+        }
+        return { minX, maxX, minY, maxY };
+      }
+
+      // Handle 'M', 'N', 'Space', and number keybinds
       document.addEventListener('keydown', (e) => {
         if (e.key.toLowerCase() === 'm') {
           isMKeyPressed = true;
@@ -267,6 +296,11 @@
         } else if (e.key.toLowerCase() === 'n') {
           isNKeyPressed = true;
           canvas.style.cursor = 'ns-resize';
+        } else if (e.key === ' ') {
+          e.preventDefault(); // Prevent scrolling
+          isSpacePressed = true;
+          isSelecting = true;
+          canvas.style.cursor = 'crosshair';
         } else if (e.ctrlKey && e.key === 'z') {
           e.preventDefault();
           undoLastStroke();
@@ -280,11 +314,19 @@
         if (e.key.toLowerCase() === 'm') {
           isMKeyPressed = false;
           isPanning = false;
-          canvas.style.cursor = isErasing ? 'default' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+          canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isNKeyPressed ? 'ns-resize' : 'crosshair';
         } else if (e.key.toLowerCase() === 'n') {
           isNKeyPressed = false;
           isZooming = false;
-          canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : 'crosshair';
+          canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : 'crosshair';
+        } else if (e.key === ' ') {
+          isSpacePressed = false;
+          isSelecting = false;
+          isDrawingSelection = false;
+          isDragging = false;
+          selectedStrokeIndices = [];
+          canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+          redrawCanvas();
         }
       });
 
@@ -292,7 +334,20 @@
       canvas.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         console.log('Pointer down:', e.pointerType, e.button, e.offsetX, e.offsetY, e.pressure);
-        if (e.button === 0 && isMKeyPressed) {
+        if (isSelecting && e.button === 0) {
+          if (selectedStrokeIndices.length > 0 && isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+            isDragging = true;
+            dragStartX = e.offsetX;
+            dragStartY = e.offsetY;
+          } else {
+            isDrawingSelection = true;
+            selectStartX = e.offsetX;
+            selectStartY = e.offsetY;
+            selectEndX = e.offsetX;
+            selectEndY = e.offsetY;
+            selectedStrokeIndices = [];
+          }
+        } else if (e.button === 0 && isMKeyPressed) {
           isPanning = true;
           lastPanX = e.clientX;
           lastPanY = e.clientY;
@@ -336,6 +391,26 @@
             redrawCanvas();
           }
           lastPanY = e.clientY;
+        } else if (isDrawingSelection) {
+          selectEndX = e.offsetX;
+          selectEndY = e.offsetY;
+          selectedStrokeIndices = getStrokesInSelection();
+          redrawCanvas();
+        } else if (isDragging) {
+          const deltaX = (e.offsetX - dragStartX) / scale;
+          const deltaY = (e.offsetY - dragStartY) / scale;
+          selectedStrokeIndices.forEach(index => {
+            const stroke = strokeHistory[index];
+            stroke.forEach(point => {
+              point.x += deltaX;
+              point.y += deltaY;
+            });
+            // Update bounding box
+            strokeBounds[index] = computeStrokeBounds(stroke);
+          });
+          dragStartX = e.offsetX;
+          dragStartY = e.offsetY;
+          redrawCanvas();
         } else if (isDrawing) {
           const pressure = e.pointerType === 'pen' ? (e.pressure || 1) : 1;
           const adjustedX = (e.offsetX - offsetX) / scale;
@@ -360,13 +435,22 @@
           isDrawing = false;
           if (currentStroke.length > 1) {
             strokeHistory.push(currentStroke);
+            strokeBounds.push(computeStrokeBounds(currentStroke));
           }
           currentStroke = [];
           console.log('End stroke, history length:', strokeHistory.length);
         }
         if (isErasing) {
           isErasing = false;
-          canvas.style.cursor = isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+          canvas.style.cursor = isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+        }
+        if (isDrawingSelection) {
+          isDrawingSelection = false;
+          redrawCanvas();
+        }
+        if (isDragging) {
+          isDragging = false;
+          redrawCanvas();
         }
         isPanning = false;
         isZooming = false;
@@ -376,10 +460,13 @@
         isDrawing = false;
         isPanning = false;
         isZooming = false;
+        isDrawingSelection = false;
+        isDragging = false;
         if (isErasing) {
           isErasing = false;
           canvas.style.cursor = 'crosshair';
         }
+        redrawCanvas();
       });
 
       // Prevent right-click context menu
@@ -416,13 +503,100 @@
 
         if (closestStrokeIndex !== -1) {
           strokeHistory.splice(closestStrokeIndex, 1);
+          strokeBounds.splice(closestStrokeIndex, 1);
+          if (selectedStrokeIndices.includes(closestStrokeIndex)) {
+            selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx !== closestStrokeIndex);
+            selectedStrokeIndices = selectedStrokeIndices.map(idx => idx > closestStrokeIndex ? idx - 1 : idx);
+          }
           redrawCanvas();
+        }
+      }
+
+      function getStrokesInSelection() {
+        const minX = Math.min(selectStartX, selectEndX) / scale - offsetX / scale;
+        const maxX = Math.max(selectStartX, selectEndX) / scale - offsetX / scale;
+        const minY = Math.min(selectStartY, selectEndY) / scale - offsetY / scale;
+        const maxY = Math.max(selectStartY, selectEndY) / scale - offsetY / scale;
+
+        const indices = [];
+        strokeBounds.forEach((bounds, index) => {
+          if (bounds &&
+              bounds.maxX >= minX && bounds.minX <= maxX &&
+              bounds.maxY >= minY && bounds.minY <= maxY) {
+            indices.push(index);
+          }
+        });
+        return indices;
+      }
+
+      function isPointNearSelectedStrokes(x, y) {
+        const canvasX = (x - offsetX) / scale;
+        const canvasY = (y - offsetY) / scale;
+        return selectedStrokeIndices.some(index => {
+          const stroke = strokeHistory[index];
+          return stroke.some(point => {
+            const dx = point.x - canvasX;
+            const dy = point.y - canvasY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            return distance < 20 / scale;
+          });
+        });
+      }
+
+      function drawSelectionRectangle() {
+        if (isDrawingSelection) {
+          ctx.save();
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.rect(
+            selectStartX,
+            selectStartY,
+            selectEndX - selectStartX,
+            selectEndY - selectStartY
+          );
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+
+      function highlightSelectedStrokes() {
+        if (selectedStrokeIndices.length > 0) {
+          ctx.save();
+          ctx.translate(offsetX, offsetY);
+          ctx.scale(scale, scale);
+          selectedStrokeIndices.forEach(index => {
+            const stroke = strokeHistory[index];
+            ctx.strokeStyle = stroke[0].color;
+            ctx.beginPath();
+            ctx.moveTo(stroke[0].x, stroke[0].y);
+            for (let i = 1; i < stroke.length; i++) {
+              ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 2;
+              ctx.lineTo(stroke[i].x, stroke[i].y);
+              ctx.stroke();
+            }
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(stroke[0].x, stroke[0].y);
+            for (let i = 1; i < stroke.length; i++) {
+              ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 4;
+              ctx.lineTo(stroke[i].x, stroke[i].y);
+              ctx.stroke();
+            }
+            ctx.globalAlpha = 1.0;
+          });
+          ctx.restore();
         }
       }
 
       function undoLastStroke() {
         if (strokeHistory.length > 0) {
           strokeHistory.pop();
+          strokeBounds.pop();
+          selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx < strokeHistory.length);
           redrawCanvas();
         }
       }
@@ -444,12 +618,16 @@
           }
         });
         ctx.restore();
+        highlightSelectedStrokes();
+        drawSelectionRectangle();
         updateCanvasStyles();
       }
 
       function clearCanvas() {
         strokeHistory = [];
+        strokeBounds = [];
         currentStroke = [];
+        selectedStrokeIndices = [];
         offsetX = 0;
         offsetY = 0;
         scale = 1;
@@ -492,6 +670,8 @@
             if (!jsonText) throw new Error('No drawing.json found in ZIP');
             strokeHistory = JSON.parse(jsonText);
             if (!Array.isArray(strokeHistory)) throw new Error('Invalid JSON format');
+            strokeBounds = strokeHistory.map(computeStrokeBounds);
+            selectedStrokeIndices = [];
             redrawCanvas();
           }).catch((err) => {
             console.error('Error loading ZIP or JSON:', err);
