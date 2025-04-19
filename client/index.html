@@ -4,129 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Full-Screen Draw with Colors, Eraser, Pan, Zoom, and Help</title>
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      }
-      #drawingCanvas {
-        display: block;
-        width: 100vw;
-        height: 100vh;
-        background-color: #15202B; /* Twitter dark theme */
-        cursor: crosshair;
-      }
-      #controls {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        z-index: 10;
-        background: rgba(21, 32, 43, 0.9);
-        padding: 8px 12px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      #controls button {
-        background: #D3D8DE;
-        color: #15202B;
-        border: none;
-        padding: 8px 12px;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: background 0.2s, transform 0.1s;
-      }
-      #controls button:hover {
-        background: #E8ECEF;
-        transform: translateY(-1px);
-      }
-      #controls button:active {
-        transform: translateY(0);
-      }
-      #controls label {
-        color: #D3D8DE;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-      #controls input[type="color"] {
-        width: 30px;
-        height: 30px;
-        padding: 2px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-      }
-      #controls input[type="range"] {
-        accent-color: #D3D8DE;
-      }
-      #controls input[type="file"] {
-        display: none;
-      }
-      #colorButtons {
-        display: flex;
-        gap: 5px;
-        flex-wrap: wrap;
-      }
-      .colorButton {
-        width: 24px;
-        height: 24px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: transform 0.1s;
-      }
-      .colorButton:hover {
-        transform: scale(1.1);
-      }
-      #helpPanel {
-        display: none;
-        position: fixed;
-        top: 60px;
-        left: 10px;
-        z-index: 11;
-        background: rgba(21, 32, 43, 0.95);
-        color: #D3D8DE;
-        padding: 12px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        max-width: 300px;
-        font-size: 14px;
-      }
-      #helpPanel h3 {
-        margin: 0 0 10px;
-        color: #D3D8DE;
-        font-size: 16px;
-      }
-      #helpPanel ul {
-        margin: 0;
-        padding-left: 20px;
-      }
-      #helpPanel button {
-        background: #D3D8DE;
-        color: #15202B;
-        border: none;
-        padding: 8px 12px;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        transition: background 0.2s, transform 0.1s;
-      }
-      #helpPanel button:hover {
-        background: #E8ECEF;
-        transform: translateY(-1px);
-      }
-      #helpPanel button:active {
-        transform: translateY(0);
-      }
-    </style>
+    <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <div id="controls">
@@ -157,7 +35,7 @@
         <li><b>Pan</b>: Hold 'M' and drag with mouse/pen.</li>
         <li><b>Zoom</b>: Hold 'N' and drag up/down with mouse/pen.</li>
         <li><b>Undo</b>: Ctrl+Z (undoes last stroke).</li>
-        <li><b>Select & Move</b>: Hold Space to enter selection mode. Hold mouse1 to draw a rectangle and select strokes. Drag with mouse1 to move selected strokes, release to drop. Release Space to exit.</li>
+        <li><b>Select & Transform</b>: Hold Space to enter selection mode. Hold mouse1 to draw a rectangle and select strokes. Drag with mouse1 to move, drag bottom-right handle to resize, scroll mouse wheel to rotate. Release Space to exit.</li>
         <li><b>Colors</b>: Use keybinds 1-9 to select colors:
           <ul>
             <li>1: White</li>
@@ -184,489 +62,610 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script>
-      const canvas = document.getElementById('drawingCanvas');
-      const ctx = canvas.getContext('2d');
-      const colorPicker = document.getElementById('colorPicker');
-      const brushSize = document.getElementById('brushSize');
-      const helpPanel = document.getElementById('helpPanel');
-      const fileInput = document.getElementById('fileInput');
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const brushSize = document.getElementById('brushSize');
+    const helpPanel = document.getElementById('helpPanel');
+    const fileInput = document.getElementById('fileInput');
 
-      // Set canvas to full screen
+    // Set canvas to full screen
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Panning, zooming, erasing, and selecting variables
+    let isPanning = false;
+    let isZooming = false;
+    let isErasing = false;
+    let isSelecting = false;
+    let isDrawingSelection = false;
+    let isDragging = false;
+    let isResizing = false;
+    let isMKeyPressed = false;
+    let isNKeyPressed = false;
+    let isSpacePressed = false;
+    let lastPanX = 0;
+    let lastPanY = 0;
+    let offsetX = 0;
+    let offsetY = 0;
+    let scale = 1;
+    const minScale = 0.1;
+    const maxScale = 10;
+    let selectStartX = 0;
+    let selectStartY = 0;
+    let selectEndX = 0;
+    let selectEndY = 0;
+    let selectedStrokeIndices = [];
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let resizeStartX = 0;
+    let resizeStartY = 0;
+    let strokeBounds = []; // Array of {minX, maxX, minY, maxY} for each stroke
+    const HANDLE_SIZE = 10; // Size of resize handle in pixels
+    const ROTATION_STEP = 10 * Math.PI / 180; // 10 degrees per scroll
+
+    // Default colors for keybinds
+    const defaultColors = [
+      '#FFFFFF', // 1: White
+      '#FF0000', // 2: Red
+      '#00FF00', // 3: Green
+      '#0000FF', // 4: Blue
+      '#FFFF00', // 5: Yellow
+      '#800080', // 6: Purple
+      '#FFA500', // 7: Orange
+      '#00FFFF', // 8: Cyan
+      '#FF00FF' // 9: Magenta
+    ];
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-
-      // Panning, zooming, erasing, and selecting variables
-      let isPanning = false;
-      let isZooming = false;
-      let isErasing = false;
-      let isSelecting = false;
-      let isDrawingSelection = false;
-      let isDragging = false;
-      let isMKeyPressed = false;
-      let isNKeyPressed = false;
-      let isSpacePressed = false;
-      let lastPanX = 0;
-      let lastPanY = 0;
-      let offsetX = 0;
-      let offsetY = 0;
-      let scale = 1;
-      const minScale = 0.1;
-      const maxScale = 10;
-      let selectStartX = 0;
-      let selectStartY = 0;
-      let selectEndX = 0;
-      let selectEndY = 0;
-      let selectedStrokeIndices = [];
-      let dragStartX = 0;
-      let dragStartY = 0;
-      let strokeBounds = []; // Array of {minX, maxX, minY, maxY} for each stroke
-
-      // Default colors for keybinds
-      const defaultColors = [
-        '#FFFFFF', // 1: White
-        '#FF0000', // 2: Red
-        '#00FF00', // 3: Green
-        '#0000FF', // 4: Blue
-        '#FFFF00', // 5: Yellow
-        '#800080', // 6: Purple
-        '#FFA500', // 7: Orange
-        '#00FFFF', // 8: Cyan
-        '#FF00FF'  // 9: Magenta
-      ];
-
-      // Handle window resize
-      window.addEventListener('resize', () => {
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        ctx.putImageData(imgData, 0, 0);
-        updateCanvasStyles();
-        redrawCanvas();
-      });
-
-      let isDrawing = false;
-      let currentStroke = [];
-      let strokeHistory = [];
-
-      // Set initial drawing styles
-      function updateCanvasStyles() {
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = colorPicker.value;
-        ctx.lineWidth = brushSize.value;
-      }
+      ctx.putImageData(imgData, 0, 0);
       updateCanvasStyles();
+      redrawCanvas();
+    });
 
-      // Update styles when controls change
-      colorPicker.addEventListener('change', () => {
-        ctx.strokeStyle = colorPicker.value;
-      });
+    let isDrawing = false;
+    let currentStroke = [];
+    let strokeHistory = [];
 
-      brushSize.addEventListener('input', () => {
-        ctx.lineWidth = brushSize.value;
-      });
+    // Set initial drawing styles
+    function updateCanvasStyles() {
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = colorPicker.value;
+      ctx.lineWidth = brushSize.value;
+    }
+    updateCanvasStyles();
 
-      // Select color from buttons or keybinds
-      function selectColor(color) {
-        colorPicker.value = color;
-        ctx.strokeStyle = color;
+    // Update styles when controls change
+    colorPicker.addEventListener('change', () => {
+      ctx.strokeStyle = colorPicker.value;
+    });
+
+    brushSize.addEventListener('input', () => {
+      ctx.lineWidth = brushSize.value;
+    });
+
+    // Select color from buttons or keybinds
+    function selectColor(color) {
+      colorPicker.value = color;
+      ctx.strokeStyle = color;
+    }
+
+    // Compute bounding box for a stroke
+    function computeStrokeBounds(stroke) {
+      if (stroke.length === 0) return null;
+      let minX = stroke[0].x;
+      let maxX = stroke[0].x;
+      let minY = stroke[0].y;
+      let maxY = stroke[0].y;
+      for (const point of stroke) {
+        minX = Math.min(minX, point.x);
+        maxX = Math.max(maxX, point.x);
+        minY = Math.min(minY, point.y);
+        maxY = Math.max(maxY, point.y);
       }
+      return { minX, maxX, minY, maxY };
+    }
 
-      // Compute bounding box for a stroke
-      function computeStrokeBounds(stroke) {
-        if (stroke.length === 0) return null;
-        let minX = stroke[0].x;
-        let maxX = stroke[0].x;
-        let minY = stroke[0].y;
-        let maxY = stroke[0].y;
-        for (const point of stroke) {
-          minX = Math.min(minX, point.x);
-          maxX = Math.max(maxX, point.x);
-          minY = Math.min(minY, point.y);
-          maxY = Math.max(maxY, point.y);
-        }
-        return { minX, maxX, minY, maxY };
-      }
-
-      // Handle 'M', 'N', 'Space', and number keybinds
-      document.addEventListener('keydown', (e) => {
-        if (e.key.toLowerCase() === 'm') {
-          isMKeyPressed = true;
-          canvas.style.cursor = 'move';
-        } else if (e.key.toLowerCase() === 'n') {
-          isNKeyPressed = true;
-          canvas.style.cursor = 'ns-resize';
-        } else if (e.key === ' ') {
-          e.preventDefault(); // Prevent scrolling
-          isSpacePressed = true;
-          isSelecting = true;
-          canvas.style.cursor = 'crosshair';
-        } else if (e.ctrlKey && e.key === 'z') {
-          e.preventDefault();
-          undoLastStroke();
-        } else if (e.key >= '1' && e.key <= '9') {
-          const index = parseInt(e.key) - 1;
-          selectColor(defaultColors[index]);
+    // Get bounding box of selected strokes
+    function getSelectionBounds() {
+      if (selectedStrokeIndices.length === 0) return null;
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      selectedStrokeIndices.forEach(index => {
+        const bounds = strokeBounds[index];
+        if (bounds) {
+          minX = Math.min(minX, bounds.minX);
+          maxX = Math.max(maxX, bounds.maxX);
+          minY = Math.min(minY, bounds.minY);
+          maxY = Math.max(maxY, bounds.maxY);
         }
       });
+      return { minX, maxX, minY, maxY };
+    }
 
-      document.addEventListener('keyup', (e) => {
-        if (e.key.toLowerCase() === 'm') {
-          isMKeyPressed = false;
-          isPanning = false;
-          canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isNKeyPressed ? 'ns-resize' : 'crosshair';
-        } else if (e.key.toLowerCase() === 'n') {
-          isNKeyPressed = false;
-          isZooming = false;
-          canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : 'crosshair';
-        } else if (e.key === ' ') {
-          isSpacePressed = false;
-          isSelecting = false;
-          isDrawingSelection = false;
-          isDragging = false;
-          selectedStrokeIndices = [];
-          canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
-          redrawCanvas();
-        }
-      });
-
-      // Handle pointer events
-      canvas.addEventListener('pointerdown', (e) => {
+    // Handle 'M', 'N', 'Space', and number keybinds
+    document.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'm') {
+        isMKeyPressed = true;
+        canvas.style.cursor = 'move';
+      } else if (e.key.toLowerCase() === 'n') {
+        isNKeyPressed = true;
+        canvas.style.cursor = 'ns-resize';
+      } else if (e.key === ' ') {
+        e.preventDefault(); // Prevent scrolling
+        isSpacePressed = true;
+        isSelecting = true;
+        canvas.style.cursor = 'crosshair';
+      } else if (e.ctrlKey && e.key === 'z') {
         e.preventDefault();
-        console.log('Pointer down:', e.pointerType, e.button, e.offsetX, e.offsetY, e.pressure);
-        if (isSelecting && e.button === 0) {
-          if (selectedStrokeIndices.length > 0 && isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
-            isDragging = true;
-            dragStartX = e.offsetX;
-            dragStartY = e.offsetY;
-          } else {
-            isDrawingSelection = true;
-            selectStartX = e.offsetX;
-            selectStartY = e.offsetY;
-            selectEndX = e.offsetX;
-            selectEndY = e.offsetY;
-            selectedStrokeIndices = [];
-          }
-        } else if (e.button === 0 && isMKeyPressed) {
-          isPanning = true;
-          lastPanX = e.clientX;
-          lastPanY = e.clientY;
-        } else if (e.button === 0 && isNKeyPressed) {
-          isZooming = true;
-          lastPanY = e.clientY;
-        } else if (e.button === 0) {
-          isDrawing = true;
-          const adjustedX = (e.offsetX - offsetX) / scale;
-          const adjustedY = (e.offsetY - offsetY) / scale;
-          currentStroke = [{
-            x: adjustedX,
-            y: adjustedY,
-            pressure: e.pointerType === 'pen' ? (e.pressure || 1) : 1,
-            color: ctx.strokeStyle,
-            lineWidth: brushSize.value
-          }];
-          console.log('Start stroke:', currentStroke[0]);
-        } else if (e.button === 2) {
-          isErasing = true;
-          canvas.style.cursor = 'default';
-          eraseStroke(e.offsetX, e.offsetY);
-        }
-      });
+        undoLastStroke();
+      } else if (e.key >= '1' && e.key <= '9') {
+        const index = parseInt(e.key) - 1;
+        selectColor(defaultColors[index]);
+      }
+    });
 
-      canvas.addEventListener('pointermove', (e) => {
-        if (isPanning) {
-          const deltaX = e.clientX - lastPanX;
-          const deltaY = e.clientY - lastPanY;
-          offsetX += deltaX;
-          offsetY += deltaY;
-          lastPanX = e.clientX;
-          lastPanY = e.clientY;
-          redrawCanvas();
-        } else if (isZooming) {
-          const deltaY = e.clientY - lastPanY;
-          const scaleFactor = 1 - deltaY * 0.005;
-          const newScale = scale * scaleFactor;
-          if (newScale >= minScale && newScale <= maxScale) {
-            scale = newScale;
-            redrawCanvas();
-          }
-          lastPanY = e.clientY;
-        } else if (isDrawingSelection) {
+    document.addEventListener('keyup', (e) => {
+      if (e.key.toLowerCase() === 'm') {
+        isMKeyPressed = false;
+        isPanning = false;
+        canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+      } else if (e.key.toLowerCase() === 'n') {
+        isNKeyPressed = false;
+        isZooming = false;
+        canvas.style.cursor = isErasing ? 'default' : isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : 'crosshair';
+      } else if (e.key === ' ') {
+        isSpacePressed = false;
+        isSelecting = false;
+        isDrawingSelection = false;
+        isDragging = false;
+        isResizing = false;
+        selectedStrokeIndices = [];
+        canvas.style.cursor = isErasing ? 'default' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+        redrawCanvas();
+      }
+    });
+
+    // Handle pointer events
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      console.log('Pointer down:', e.pointerType, e.button, e.offsetX, e.offsetY, e.pressure);
+      if (isSelecting && e.button === 0) {
+        if (selectedStrokeIndices.length > 0 && isPointNearResizeHandle(e.offsetX, e.offsetY)) {
+          isResizing = true;
+          resizeStartX = e.offsetX;
+          resizeStartY = e.offsetY;
+        } else if (selectedStrokeIndices.length > 0 && isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+          isDragging = true;
+          dragStartX = e.offsetX;
+          dragStartY = e.offsetY;
+        } else {
+          isDrawingSelection = true;
+          selectStartX = e.offsetX;
+          selectStartY = e.offsetY;
           selectEndX = e.offsetX;
           selectEndY = e.offsetY;
-          selectedStrokeIndices = getStrokesInSelection();
+          selectedStrokeIndices = [];
+        }
+      } else if (e.button === 0 && isMKeyPressed) {
+        isPanning = true;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+      } else if (e.button === 0 && isNKeyPressed) {
+        isZooming = true;
+        lastPanY = e.clientY;
+      } else if (e.button === 0) {
+        isDrawing = true;
+        const adjustedX = (e.offsetX - offsetX) / scale;
+        const adjustedY = (e.offsetY - offsetY) / scale;
+        currentStroke = [{
+          x: adjustedX,
+          y: adjustedY,
+          pressure: e.pointerType === 'pen' ? (e.pressure || 1) : 1,
+          color: ctx.strokeStyle,
+          lineWidth: brushSize.value
+        }];
+        console.log('Start stroke:', currentStroke[0]);
+      } else if (e.button === 2) {
+        isErasing = true;
+        canvas.style.cursor = 'default';
+        eraseStroke(e.offsetX, e.offsetY);
+      }
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      if (isPanning) {
+        const deltaX = e.clientX - lastPanX;
+        const deltaY = e.clientY - lastPanY;
+        offsetX += deltaX;
+        offsetY += deltaY;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        redrawCanvas();
+      } else if (isZooming) {
+        const deltaY = e.clientY - lastPanY;
+        const scaleFactor = 1 - deltaY * 0.005;
+        const newScale = scale * scaleFactor;
+        if (newScale >= minScale && newScale <= maxScale) {
+          scale = newScale;
           redrawCanvas();
-        } else if (isDragging) {
-          const deltaX = (e.offsetX - dragStartX) / scale;
-          const deltaY = (e.offsetY - dragStartY) / scale;
+        }
+        lastPanY = e.clientY;
+      } else if (isDrawingSelection) {
+        selectEndX = e.offsetX;
+        selectEndY = e.offsetY;
+        selectedStrokeIndices = getStrokesInSelection();
+        redrawCanvas();
+      } else if (isDragging) {
+        const deltaX = (e.offsetX - dragStartX) / scale;
+        const deltaY = (e.offsetY - dragStartY) / scale;
+        selectedStrokeIndices.forEach(index => {
+          const stroke = strokeHistory[index];
+          stroke.forEach(point => {
+            point.x += deltaX;
+            point.y += deltaY;
+          });
+          strokeBounds[index] = computeStrokeBounds(stroke);
+        });
+        dragStartX = e.offsetX;
+        dragStartY = e.offsetY;
+        redrawCanvas();
+      } else if (isResizing) {
+        const selectionBounds = getSelectionBounds();
+        if (selectionBounds) {
+          const centerX = (selectionBounds.minX + selectionBounds.maxX) / 2;
+          const centerY = (selectionBounds.minY + selectionBounds.maxY) / 2;
+          const origWidth = selectionBounds.maxX - selectionBounds.minX;
+          const origHeight = selectionBounds.maxY - selectionBounds.minY;
+          const newX = e.offsetX / scale - offsetX / scale;
+          const newY = e.offsetY / scale - offsetY / scale;
+          const origHandleX = selectionBounds.maxX;
+          const origHandleY = selectionBounds.maxY;
+          const dx = newX - origHandleX;
+          const dy = newY - origHandleY;
+          const scaleFactor = Math.max(0.1, 1 + (dx + dy) / (origWidth + origHeight));
           selectedStrokeIndices.forEach(index => {
             const stroke = strokeHistory[index];
             stroke.forEach(point => {
-              point.x += deltaX;
-              point.y += deltaY;
+              const relX = point.x - centerX;
+              const relY = point.y - centerY;
+              point.x = centerX + relX * scaleFactor;
+              point.y = centerY + relY * scaleFactor;
+              point.lineWidth *= scaleFactor;
             });
-            // Update bounding box
             strokeBounds[index] = computeStrokeBounds(stroke);
           });
-          dragStartX = e.offsetX;
-          dragStartY = e.offsetY;
-          redrawCanvas();
-        } else if (isDrawing) {
-          const pressure = e.pointerType === 'pen' ? (e.pressure || 1) : 1;
-          const adjustedX = (e.offsetX - offsetX) / scale;
-          const adjustedY = (e.offsetY - offsetY) / scale;
-          const point = {
-            x: adjustedX,
-            y: adjustedY,
-            pressure: pressure,
-            color: ctx.strokeStyle,
-            lineWidth: brushSize.value
-          };
-          currentStroke.push(point);
-          draw(e.offsetX, e.offsetY, pressure);
-          console.log('Drawing:', point, 'Pressure:', pressure);
-        } else if (isErasing) {
-          eraseStroke(e.offsetX, e.offsetY);
-        }
-      });
-
-      canvas.addEventListener('pointerup', () => {
-        if (isDrawing) {
-          isDrawing = false;
-          if (currentStroke.length > 1) {
-            strokeHistory.push(currentStroke);
-            strokeBounds.push(computeStrokeBounds(currentStroke));
-          }
-          currentStroke = [];
-          console.log('End stroke, history length:', strokeHistory.length);
-        }
-        if (isErasing) {
-          isErasing = false;
-          canvas.style.cursor = isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
-        }
-        if (isDrawingSelection) {
-          isDrawingSelection = false;
           redrawCanvas();
         }
-        if (isDragging) {
-          isDragging = false;
-          redrawCanvas();
-        }
-        isPanning = false;
-        isZooming = false;
-      });
-
-      canvas.addEventListener('pointerleave', () => {
-        isDrawing = false;
-        isPanning = false;
-        isZooming = false;
-        isDrawingSelection = false;
-        isDragging = false;
-        if (isErasing) {
-          isErasing = false;
+      } else if (isDrawing) {
+        const pressure = e.pointerType === 'pen' ? (e.pressure || 1) : 1;
+        const adjustedX = (e.offsetX - offsetX) / scale;
+        const adjustedY = (e.offsetY - offsetY) / scale;
+        const point = {
+          x: adjustedX,
+          y: adjustedY,
+          pressure: pressure,
+          color: ctx.strokeStyle,
+          lineWidth: brushSize.value
+        };
+        currentStroke.push(point);
+        draw(e.offsetX, e.offsetY, pressure);
+        console.log('Drawing:', point, 'Pressure:', pressure);
+      } else if (isErasing) {
+        eraseStroke(e.offsetX, e.offsetY);
+      } else if (isSelecting && selectedStrokeIndices.length > 0) {
+        if (isPointNearResizeHandle(e.offsetX, e.offsetY)) {
+          canvas.style.cursor = 'se-resize';
+        } else if (isPointNearSelectedStrokes(e.offsetX, e.offsetY)) {
+          canvas.style.cursor = 'move';
+        } else {
           canvas.style.cursor = 'crosshair';
         }
+      }
+    });
+
+    canvas.addEventListener('pointerup', () => {
+      if (isDrawing) {
+        isDrawing = false;
+        if (currentStroke.length > 1) {
+          strokeHistory.push(currentStroke);
+          strokeBounds.push(computeStrokeBounds(currentStroke));
+        }
+        currentStroke = [];
+        console.log('End stroke, history length:', strokeHistory.length);
+      }
+      if (isErasing) {
+        isErasing = false;
+        canvas.style.cursor = isSelecting ? 'crosshair' : isMKeyPressed ? 'move' : isNKeyPressed ? 'ns-resize' : 'crosshair';
+      }
+      if (isDrawingSelection) {
+        isDrawingSelection = false;
         redrawCanvas();
-      });
+      }
+      if (isDragging) {
+        isDragging = false;
+        redrawCanvas();
+      }
+      if (isResizing) {
+        isResizing = false;
+        redrawCanvas();
+      }
+      isPanning = false;
+      isZooming = false;
+    });
 
-      // Prevent right-click context menu
-      canvas.addEventListener('contextmenu', (e) => {
+    canvas.addEventListener('pointerleave', () => {
+      isDrawing = false;
+      isPanning = false;
+      isZooming = false;
+      isDrawingSelection = false;
+      isDragging = false;
+      isResizing = false;
+      if (isErasing) {
+        isErasing = false;
+        canvas.style.cursor = 'crosshair';
+      }
+      redrawCanvas();
+    });
+
+    // Handle mouse wheel for rotation
+    canvas.addEventListener('wheel', (e) => {
+      if (isSelecting && selectedStrokeIndices.length > 0) {
         e.preventDefault();
-      });
-
-      function draw(x, y, pressure) {
-        const lastPoint = currentStroke[currentStroke.length - 2] || currentStroke[0];
-        ctx.beginPath();
-        ctx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
-        ctx.lineTo(x, y);
-        ctx.lineWidth = brushSize.value * pressure * scale;
-        ctx.stroke();
-      }
-
-      function eraseStroke(x, y) {
-        const clickX = (x - offsetX) / scale;
-        const clickY = (y - offsetY) / scale;
-        let closestStrokeIndex = -1;
-        let minDistance = Infinity;
-
-        strokeHistory.forEach((stroke, index) => {
-          for (const point of stroke) {
-            const dx = point.x - clickX;
-            const dy = point.y - clickY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < minDistance && distance < 20 / scale) {
-              minDistance = distance;
-              closestStrokeIndex = index;
-            }
-          }
-        });
-
-        if (closestStrokeIndex !== -1) {
-          strokeHistory.splice(closestStrokeIndex, 1);
-          strokeBounds.splice(closestStrokeIndex, 1);
-          if (selectedStrokeIndices.includes(closestStrokeIndex)) {
-            selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx !== closestStrokeIndex);
-            selectedStrokeIndices = selectedStrokeIndices.map(idx => idx > closestStrokeIndex ? idx - 1 : idx);
-          }
-          redrawCanvas();
-        }
-      }
-
-      function getStrokesInSelection() {
-        const minX = Math.min(selectStartX, selectEndX) / scale - offsetX / scale;
-        const maxX = Math.max(selectStartX, selectEndX) / scale - offsetX / scale;
-        const minY = Math.min(selectStartY, selectEndY) / scale - offsetY / scale;
-        const maxY = Math.max(selectStartY, selectEndY) / scale - offsetY / scale;
-
-        const indices = [];
-        strokeBounds.forEach((bounds, index) => {
-          if (bounds &&
-              bounds.maxX >= minX && bounds.minX <= maxX &&
-              bounds.maxY >= minY && bounds.minY <= maxY) {
-            indices.push(index);
-          }
-        });
-        return indices;
-      }
-
-      function isPointNearSelectedStrokes(x, y) {
-        const canvasX = (x - offsetX) / scale;
-        const canvasY = (y - offsetY) / scale;
-        return selectedStrokeIndices.some(index => {
-          const stroke = strokeHistory[index];
-          return stroke.some(point => {
-            const dx = point.x - canvasX;
-            const dy = point.y - canvasY;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            return distance < 20 / scale;
-          });
-        });
-      }
-
-      function drawSelectionRectangle() {
-        if (isDrawingSelection) {
-          ctx.save();
-          ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = 1;
-          ctx.setLineDash([5, 5]);
-          ctx.beginPath();
-          ctx.rect(
-            selectStartX,
-            selectStartY,
-            selectEndX - selectStartX,
-            selectEndY - selectStartY
-          );
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.restore();
-        }
-      }
-
-      function highlightSelectedStrokes() {
-        if (selectedStrokeIndices.length > 0) {
-          ctx.save();
-          ctx.translate(offsetX, offsetY);
-          ctx.scale(scale, scale);
+        const selectionBounds = getSelectionBounds();
+        if (selectionBounds) {
+          const centerX = (selectionBounds.minX + selectionBounds.maxX) / 2;
+          const centerY = (selectionBounds.minY + selectionBounds.maxY) / 2;
+          const angle = (e.deltaY < 0 ? ROTATION_STEP : -ROTATION_STEP);
+          const cosA = Math.cos(angle);
+          const sinA = Math.sin(angle);
           selectedStrokeIndices.forEach(index => {
             const stroke = strokeHistory[index];
-            ctx.strokeStyle = stroke[0].color;
-            ctx.beginPath();
-            ctx.moveTo(stroke[0].x, stroke[0].y);
-            for (let i = 1; i < stroke.length; i++) {
-              ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 2;
-              ctx.lineTo(stroke[i].x, stroke[i].y);
-              ctx.stroke();
-            }
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.globalAlpha = 0.5;
-            ctx.beginPath();
-            ctx.moveTo(stroke[0].x, stroke[0].y);
-            for (let i = 1; i < stroke.length; i++) {
-              ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 4;
-              ctx.lineTo(stroke[i].x, stroke[i].y);
-              ctx.stroke();
-            }
-            ctx.globalAlpha = 1.0;
+            stroke.forEach(point => {
+              const relX = point.x - centerX;
+              const relY = point.y - centerY;
+              point.x = centerX + (relX * cosA - relY * sinA);
+              point.y = centerY + (relX * sinA + relY * cosA);
+            });
+            strokeBounds[index] = computeStrokeBounds(stroke);
           });
-          ctx.restore();
-        }
-      }
-
-      function undoLastStroke() {
-        if (strokeHistory.length > 0) {
-          strokeHistory.pop();
-          strokeBounds.pop();
-          selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx < strokeHistory.length);
           redrawCanvas();
         }
       }
+    });
 
-      function redrawCanvas() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Prevent right-click context menu
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
+    function draw(x, y, pressure) {
+      const lastPoint = currentStroke[currentStroke.length - 2] || currentStroke[0];
+      ctx.beginPath();
+      ctx.moveTo(lastPoint.x * scale + offsetX, lastPoint.y * scale + offsetY);
+      ctx.lineTo(x, y);
+      ctx.lineWidth = brushSize.value * pressure * scale;
+      ctx.stroke();
+    }
+
+    function eraseStroke(x, y) {
+      const clickX = (x - offsetX) / scale;
+      const clickY = (y - offsetY) / scale;
+      let closestStrokeIndex = -1;
+      let minDistance = Infinity;
+
+      strokeHistory.forEach((stroke, index) => {
+        for (const point of stroke) {
+          const dx = point.x - clickX;
+          const dy = point.y - clickY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < minDistance && distance < 20 / scale) {
+            minDistance = distance;
+            closestStrokeIndex = index;
+          }
+        }
+      });
+
+      if (closestStrokeIndex !== -1) {
+        strokeHistory.splice(closestStrokeIndex, 1);
+        strokeBounds.splice(closestStrokeIndex, 1);
+        if (selectedStrokeIndices.includes(closestStrokeIndex)) {
+          selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx !== closestStrokeIndex);
+          selectedStrokeIndices = selectedStrokeIndices.map(idx => idx > closestStrokeIndex ? idx - 1 : idx);
+        }
+        redrawCanvas();
+      }
+    }
+
+    function getStrokesInSelection() {
+      const minX = Math.min(selectStartX, selectEndX) / scale - offsetX / scale;
+      const maxX = Math.max(selectStartX, selectEndX) / scale - offsetX / scale;
+      const minY = Math.min(selectStartY, selectEndY) / scale - offsetY / scale;
+      const maxY = Math.max(selectStartY, selectEndY) / scale - offsetY / scale;
+
+      const indices = [];
+      strokeBounds.forEach((bounds, index) => {
+        if (bounds &&
+          bounds.maxX >= minX && bounds.minX <= maxX &&
+          bounds.maxY >= minY && bounds.minY <= maxY) {
+          indices.push(index);
+        }
+      });
+      return indices;
+    }
+
+    function isPointNearSelectedStrokes(x, y) {
+      const canvasX = (x - offsetX) / scale;
+      const canvasY = (y - offsetY) / scale;
+      return selectedStrokeIndices.some(index => {
+        const stroke = strokeHistory[index];
+        return stroke.some(point => {
+          const dx = point.x - canvasX;
+          const dy = point.y - canvasY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          return distance < 20 / scale;
+        });
+      });
+    }
+
+    function isPointNearResizeHandle(x, y) {
+      const selectionBounds = getSelectionBounds();
+      if (!selectionBounds) return false;
+      const handleX = (selectionBounds.maxX * scale + offsetX);
+      const handleY = (selectionBounds.maxY * scale + offsetY);
+      const dx = x - handleX;
+      const dy = y - handleY;
+      return Math.sqrt(dx * dx + dy * dy) < HANDLE_SIZE;
+    }
+
+    function drawSelectionRectangle() {
+      if (isDrawingSelection) {
+        ctx.save();
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.rect(
+          selectStartX,
+          selectStartY,
+          selectEndX - selectStartX,
+          selectEndY - selectStartY
+        );
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+
+    function drawHandles() {
+      const selectionBounds = getSelectionBounds();
+      if (selectionBounds && selectedStrokeIndices.length > 0) {
+        ctx.save();
+        // Resize handle (bottom-right)
+        const handleX = (selectionBounds.maxX * scale + offsetX);
+        const handleY = (selectionBounds.maxY * scale + offsetY);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(handleX - HANDLE_SIZE / 2, handleY - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        // Rotation handle (above top center)
+        const centerX = ((selectionBounds.minX + selectionBounds.maxX) / 2 * scale + offsetX);
+        const topY = (selectionBounds.minY * scale + offsetY);
+        ctx.beginPath();
+        ctx.arc(centerX, topY - 15, 5, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function highlightSelectedStrokes() {
+      if (selectedStrokeIndices.length > 0) {
         ctx.save();
         ctx.translate(offsetX, offsetY);
         ctx.scale(scale, scale);
-        strokeHistory.forEach(stroke => {
-          if (stroke.length < 2) return;
+        selectedStrokeIndices.forEach(index => {
+          const stroke = strokeHistory[index];
           ctx.strokeStyle = stroke[0].color;
           ctx.beginPath();
           ctx.moveTo(stroke[0].x, stroke[0].y);
           for (let i = 1; i < stroke.length; i++) {
-            ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure;
+            ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 2;
             ctx.lineTo(stroke[i].x, stroke[i].y);
             ctx.stroke();
           }
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(stroke[0].x, stroke[0].y);
+          for (let i = 1; i < stroke.length; i++) {
+            ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure + 4;
+            ctx.lineTo(stroke[i].x, stroke[i].y);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1.0;
         });
         ctx.restore();
-        highlightSelectedStrokes();
-        drawSelectionRectangle();
-        updateCanvasStyles();
       }
+    }
 
-      function clearCanvas() {
-        strokeHistory = [];
-        strokeBounds = [];
-        currentStroke = [];
-        selectedStrokeIndices = [];
-        offsetX = 0;
-        offsetY = 0;
-        scale = 1;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    function undoLastStroke() {
+      if (strokeHistory.length > 0) {
+        strokeHistory.pop();
+        strokeBounds.pop();
+        selectedStrokeIndices = selectedStrokeIndices.filter(idx => idx < strokeHistory.length);
+        redrawCanvas();
       }
+    }
 
-      function saveCanvas() {
-        let fileName = window.prompt('Enter file name for your drawing:', 'drawing');
-        if (fileName === null) return; // User canceled
-        fileName = fileName.trim() || 'drawing'; // Default if empty
-        // Sanitize filename: remove invalid characters
-        fileName = fileName.replace(/[<>:"/\\|?*]+/g, '').replace(/\s+/g, '_');
+    function redrawCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+      strokeHistory.forEach(stroke => {
+        if (stroke.length < 2) return;
+        ctx.strokeStyle = stroke[0].color;
+        ctx.beginPath();
+        ctx.moveTo(stroke[0].x, stroke[0].y);
+        for (let i = 1; i < stroke.length; i++) {
+          ctx.lineWidth = stroke[i].lineWidth * stroke[i].pressure;
+          ctx.lineTo(stroke[i].x, stroke[i].y);
+          ctx.stroke();
+        }
+      });
+      ctx.restore();
+      highlightSelectedStrokes();
+      drawSelectionRectangle();
+      drawHandles();
+      updateCanvasStyles();
+    }
 
-        const jsonData = JSON.stringify(strokeHistory);
-        const zip = new JSZip();
-        zip.file('drawing.json', jsonData);
-        zip.generateAsync({ type: 'blob' }).then((content) => {
-          saveAs(content, `${fileName}.json.zip`);
-        }).catch((err) => {
+    function clearCanvas() {
+      strokeHistory = [];
+      strokeBounds = [];
+      currentStroke = [];
+      selectedStrokeIndices = [];
+      offsetX = 0;
+      offsetY = 0;
+      scale = 1;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function saveCanvas() {
+      let fileName = window.prompt('Enter file name for your drawing:', 'drawing');
+      if (fileName === null) return; // User canceled
+      fileName = fileName.trim() || 'drawing'; // Default if empty
+      // Sanitize filename: remove invalid characters
+      fileName = fileName.replace(/[<>:"/\\|?*]+/g, '').replace(/\s+/g, '_');
+
+      const jsonData = JSON.stringify(strokeHistory);
+      const zip = new JSZip();
+      zip.file('drawing.json', jsonData);
+      zip.generateAsync({ type: 'blob' }).then((content) => {
+        saveAs(content, `${fileName}.json.zip`);
+      }).catch((err) => {
           console.error('Error creating ZIP file:', err);
           alert('Failed to save the file. Please try again.');
         });
-      }
+    }
 
-      function loadCanvas() {
-        const file = fileInput.files[0];
-        if (!file) return;
+    function loadCanvas() {
+      const file = fileInput.files[0];
+      if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const fileContent = e.target.result;
-          if (!file.name.toLowerCase().endsWith('.zip')) {
-            alert('Please select a .json.zip file.');
-            return;
-          }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const fileContent = e.target.result;
+        if (!file.name.toLowerCase().endsWith('.zip')) {
+          alert('Please select a .json.zip file.');
+          return;
+        }
 
-          JSZip.loadAsync(fileContent).then((zip) => {
-            return zip.file('drawing.json')?.async('string');
-          }).then((jsonText) => {
+        JSZip.loadAsync(fileContent).then((zip) => {
+          return zip.file('drawing.json')?.async('string');
+        }).then((jsonText) => {
             if (!jsonText) throw new Error('No drawing.json found in ZIP');
             strokeHistory = JSON.parse(jsonText);
             if (!Array.isArray(strokeHistory)) throw new Error('Invalid JSON format');
@@ -677,22 +676,22 @@
             console.error('Error loading ZIP or JSON:', err);
             alert('Failed to load file. Ensure it contains a valid drawing.json.');
           });
-        };
+      };
 
-        reader.onerror = function() {
-          console.error('Error reading file:', reader.error);
-          alert('Failed to read the file. Please try again.');
-        };
+      reader.onerror = function() {
+        console.error('Error reading file:', reader.error);
+        alert('Failed to read the file. Please try again.');
+      };
 
-        reader.readAsArrayBuffer(file);
-        fileInput.value = ''; // Reset input for next selection
-      }
+      reader.readAsArrayBuffer(file);
+      fileInput.value = ''; // Reset input for next selection
+    }
 
-      fileInput.addEventListener('change', loadCanvas);
+    fileInput.addEventListener('change', loadCanvas);
 
-      function toggleHelp() {
-        helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
-      }
+    function toggleHelp() {
+      helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
+    }
     </script>
   </body>
 </html>
