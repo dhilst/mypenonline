@@ -633,13 +633,6 @@
 
       // --- SVG Save/Load ---
       function saveCanvas() {
-          let fileName = window.prompt('Enter file name for SVG:', 'drawing');
-          if (fileName === null) return;
-          fileName = (fileName.trim() || 'drawing').replace(/[<>:"/\\|?*]+/g, '').replace(/\s+/g, '_');
-          if (!fileName.toLowerCase().endsWith('.svg')) {
-              fileName += '.svg';
-          }
-
           const bounds = getDrawingBounds() || { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height }; // Fallback bounds
           const vbX = bounds.minX;
           const vbY = bounds.minY;
@@ -670,8 +663,12 @@
 
           svgContent += `</svg>`;
 
+          let filename = prompt("File name: ", "drawing") || "drawing.svg";
+          if (!filename.toLowerCase().endsWith(".svg")) {
+              filename += ".svg";
+          }
           const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-          saveAs(blob, fileName); // Use FileSaver.js
+          saveAs(blob, filename); // Use FileSaver.js
       }
 
       function loadCanvas() {
