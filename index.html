@@ -42,6 +42,7 @@
         <button class="colorButton" style="background: #FFA500;" onclick="SettingsModule.selectColor('#FFA500')"></button>
         <button class="colorButton" style="background: #00FFFF;" onclick="SettingsModule.selectColor('#00FFFF')"></button>
         <button class="colorButton" style="background: #FF00FF;" onclick="SettingsModule.selectColor('#FF00FF')"></button>
+        <button class="colorButton" style="background: #000000;" onclick="SettingsModule.selectColor('#000000')"></button>
       </div>
       <label>Brush Size: <input type="range" id="brushSize" min="1" max="50" value="5"></label>
       <label>Fill: 
@@ -120,7 +121,7 @@
       
       // --- Modules ---
       const SettingsModule = {
-        defaultColors: ['#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#800080', '#FFA500', '#00FFFF', '#FF00FF'],
+        defaultColors: ['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#800080', '#FFA500', '#00FFFF', '#FF00FF'],
         currentStrokeColor: '#FFFFFF',
         currentStrokeLineWidth: 5,
         currentFillColor: 'none',
@@ -181,15 +182,16 @@
               }
             }
           },
-          '1': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[0]) },
-          '2': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[1]) },
-          '3': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[2]) },
-          '4': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[3]) },
-          '5': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[4]) },
-          '6': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[5]) },
-          '7': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[6]) },
-          '8': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[7]) },
-          '9': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[8]) }
+          '0': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[0]) },
+          '1': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[1]) },
+          '2': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[2]) },
+          '3': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[3]) },
+          '4': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[4]) },
+          '5': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[5]) },
+          '6': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[6]) },
+          '7': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[7]) },
+          '8': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[8]) },
+          '9': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[9]) },
         },
 
         init() {
