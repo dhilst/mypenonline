@@ -105,22 +105,48 @@
               minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
               minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
           });
-          // Add margin AFTER finding min/max points
           return { minX: minX - margin, maxX: maxX + margin, minY: minY - margin, maxY: maxY + margin };
+      }
+
+      // NEW: Parse SVG path 'd' attribute to extract points
+      function parseSvgPathToPoints(d) {
+        const points = [];
+        // Split commands (M, L, Z, etc.) while preserving numbers
+        const tokens = d.match(/[MLZmlz]|[+-]?\d*\.?\d+(?:[eE][+-]?\d+)?/g) || [];
+        let currentX = 0, currentY = 0;
+
+        for (let i = 0; i < tokens.length; i++) {
+          const token = tokens[i];
+          if (token.match(/[ML]/i)) { // MoveTo or LineTo
+            // Next two tokens should be x, y
+            const x = parseFloat(tokens[i + 1]);
+            const y = parseFloat(tokens[i + 2]);
+            if (!isNaN(x) && !isNaN(y)) {
+              points.push({ x, y });
+              currentX = x;
+              currentY = y;
+              i += 2; // Skip coordinates
+            }
+          } else if (token.match(/[Z]/i)) { // ClosePath (optional handling)
+            // No action needed for bounds
+          }
+          // Ignore unsupported commands (e.g., C, Q for curves) for simplicity
+        }
+        return points;
       }
 
       function transformPoint(matrix, x, y) {
           const p = new DOMPoint(x, y);
           try {
               return matrix.transformPoint(p);
-          } catch (e) { // Handle non-invertible matrix case if needed during inverse
+          } catch (e) {
               console.error("Matrix transformation error:", e);
-              return p; // Return original point?
+              return p;
           }
       }
 
       function transformBounds(matrix, bounds) {
-          if (!bounds) return null; // Can't transform null bounds
+          if (!bounds) return null;
           try {
             const p1 = transformPoint(matrix, bounds.minX, bounds.minY);
             const p2 = transformPoint(matrix, bounds.maxX, bounds.minY);
@@ -138,73 +164,62 @@
           }
       }
 
-       // Gets the current visual bounds of the selected strokes
-       function getSelectionBounds() {
-           let overallBounds = null;
-           strokeHistory.forEach(strokeInfo => {
-               if (strokeInfo.isSelected) {
-                   // Use originalBounds if available, otherwise skip (or estimate?)
-                   if (strokeInfo.originalBounds) {
-                       const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
-                       if (currentBounds) {
-                           if (!overallBounds) {
-                               overallBounds = { ...currentBounds };
-                           } else {
-                               overallBounds.minX = Math.min(overallBounds.minX, currentBounds.minX);
-                               overallBounds.maxX = Math.max(overallBounds.maxX, currentBounds.maxX);
-                               overallBounds.minY = Math.min(overallBounds.minY, currentBounds.minY);
-                               overallBounds.maxY = Math.max(overallBounds.maxY, currentBounds.maxY);
-                           }
-                       }
-                   }
-               }
-           });
-           return overallBounds;
-       }
+      function getSelectionBounds() {
+          let overallBounds = null;
+          strokeHistory.forEach(strokeInfo => {
+              if (strokeInfo.isSelected && strokeInfo.originalBounds) {
+                  const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+                  if (currentBounds) {
+                      if (!overallBounds) {
+                          overallBounds = { ...currentBounds };
+                      } else {
+                          overallBounds.minX = Math.min(overallBounds.minX, currentBounds.minX);
+                          overallBounds.maxX = Math.max(overallBounds.maxX, currentBounds.maxX);
+                          overallBounds.minY = Math.min(overallBounds.minY, currentBounds.minY);
+                          overallBounds.maxY = Math.max(overallBounds.maxY, currentBounds.maxY);
+                      }
+                  }
+              }
+          });
+          return overallBounds;
+      }
 
-       // Gets overall bounds of the entire drawing (in world coords) for SVG viewBox
-       function getDrawingBounds() {
-           let overallBounds = null;
-           strokeHistory.forEach(strokeInfo => {
-                if (strokeInfo.originalBounds) {
-                   const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
-                    if (currentBounds) {
-                       if (!overallBounds) {
-                           overallBounds = { ...currentBounds };
-                       } else {
-                           overallBounds.minX = Math.min(overallBounds.minX, currentBounds.minX);
-                           overallBounds.maxX = Math.max(overallBounds.maxX, currentBounds.maxX);
-                           overallBounds.minY = Math.min(overallBounds.minY, currentBounds.minY);
-                           overallBounds.maxY = Math.max(overallBounds.maxY, currentBounds.maxY);
-                       }
-                   }
-               }
-               // If no original bounds, we might need to estimate from path? Skip for now.
-           });
-            // Add padding if desired
-            if (overallBounds) {
-                const padding = 20; // World coordinate padding
-                overallBounds.minX -= padding;
-                overallBounds.minY -= padding;
-                overallBounds.maxX += padding;
-                overallBounds.maxY += padding;
-            }
-
-           return overallBounds;
-       }
-
+      function getDrawingBounds() {
+          let overallBounds = null;
+          strokeHistory.forEach(strokeInfo => {
+              if (strokeInfo.originalBounds) {
+                  const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+                  if (currentBounds) {
+                      if (!overallBounds) {
+                          overallBounds = { ...currentBounds };
+                      } else {
+                          overallBounds.minX = Math.min(overallBounds.minX, currentBounds.minX);
+                          overallBounds.maxX = Math.max(overallBounds.maxX, currentBounds.maxX);
+                          overallBounds.minY = Math.min(overallBounds.minY, currentBounds.minY);
+                          overallBounds.maxY = Math.max(overallBounds.maxY, currentBounds.maxY);
+                      }
+                  }
+              }
+          });
+          if (overallBounds) {
+              const padding = 20;
+              overallBounds.minX -= padding;
+              overallBounds.minY -= padding;
+              overallBounds.maxX += padding;
+              overallBounds.maxY += padding;
+          }
+          return overallBounds;
+      }
 
       function createSvgPathString(commands) {
-          // Limit precision for SVG output
           const format = (num) => parseFloat(num).toFixed(2);
           return commands.map(cmd => {
               if (cmd.length === 3) return `${cmd[0]} ${format(cmd[1])} ${format(cmd[2])}`;
-              return cmd.join(' '); // Should only be M or L here anyway
+              return cmd.join(' ');
           }).join(' ');
       }
 
       // --- Key Listeners ---
-      // (Keep existing key listeners, ensure Escape deselects correctly)
       document.addEventListener('keydown', (e) => {
         if (document.activeElement === colorPicker || document.activeElement === brushSize) return;
 
@@ -222,16 +237,15 @@
         else if (e.key >= '1' && e.key <= '9') selectColor(defaultColors[parseInt(e.key) - 1]);
         else if (e.key === 'Escape') {
           if (isDrawingSelection) {
-              isDrawingSelection = false; // Cancel selection draw
+              isDrawingSelection = false;
               redrawCanvas();
           } else {
-              // Deselect all
               strokeHistory.forEach(s => s.isSelected = false);
               isDragging = false; isResizing = false;
               redrawCanvas();
           }
         }
-         updateCursor();
+        updateCursor();
       });
 
       document.addEventListener('keyup', (e) => {
@@ -239,392 +253,373 @@
         else if (e.key.toLowerCase() === 'n') { isNKeyPressed = false; isZooming = false; }
         else if (e.key === ' ') {
           isSpacePressed = false; isSelecting = false; isDrawingSelection = false;
-           if (!isDragging && !isResizing) redrawCanvas();
+          if (!isDragging && !isResizing) redrawCanvas();
         }
-         updateCursor();
+        updateCursor();
       });
 
-
       // --- Pointer Events ---
-      // (Keep existing pointer event logic structure)
-       canvas.addEventListener('pointerdown', (e) => {
-           e.preventDefault();
-           canvas.focus();
+      canvas.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          canvas.focus();
 
-           const mouseX = e.offsetX;
-           const mouseY = e.offsetY;
-           const worldX = (mouseX - offsetX) / scale;
-           const worldY = (mouseY - offsetY) / scale;
-           const currentSelectionBounds = getSelectionBounds();
+          const mouseX = e.offsetX;
+          const mouseY = e.offsetY;
+          const worldX = (mouseX - offsetX) / scale;
+          const worldY = (mouseY - offsetY) / scale;
+          const currentSelectionBounds = getSelectionBounds();
 
-           // --- Selection / Transform Logic ---
-           if (isSelecting && e.button === 0) {
-               if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
-                   isResizing = true;
-                   resizeStartBounds = currentSelectionBounds;
-                   dragStartX = (resizeStartBounds.minX + resizeStartBounds.maxX) / 2; // Center X
-                   dragStartY = (resizeStartBounds.minY + resizeStartBounds.maxY) / 2; // Center Y
-               } else if (currentSelectionBounds && isPointNearSelectedStrokes(worldX, worldY)) {
-                   isDragging = true;
-                   dragStartX = worldX; dragStartY = worldY;
-               } else {
-                   isDrawingSelection = true;
-                   selectStartX = mouseX; selectStartY = mouseY;
-                   selectEndX = mouseX; selectEndY = mouseY;
-                   strokeHistory.forEach(s => s.isSelected = false); // Clear selection
-               }
-           } else if (!isSelecting && e.button === 0 && strokeHistory.some(s => s.isSelected)) {
-               if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
-                   isResizing = true;
-                   resizeStartBounds = currentSelectionBounds;
-                   dragStartX = (resizeStartBounds.minX + resizeStartBounds.maxX) / 2;
-                   dragStartY = (resizeStartBounds.minY + resizeStartBounds.maxY) / 2;
-               } else if (currentSelectionBounds && isPointNearSelectedStrokes(worldX, worldY)) {
-                   isDragging = true;
-                   dragStartX = worldX; dragStartY = worldY;
-               }
-                // Else: Click outside, potentially start drawing
-           }
+          if (isSelecting && e.button === 0) {
+              if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+                  isResizing = true;
+                  resizeStartBounds = currentSelectionBounds;
+                  dragStartX = (resizeStartBounds.minX + resizeStartBounds.maxX) / 2;
+                  dragStartY = (resizeStartBounds.minY + resizeStartBounds.maxY) / 2;
+              } else if (currentSelectionBounds && isPointNearSelectedStrokes(worldX, worldY)) {
+                  isDragging = true;
+                  dragStartX = worldX; dragStartY = worldY;
+              } else {
+                  isDrawingSelection = true;
+                  selectStartX = mouseX; selectStartY = mouseY;
+                  selectEndX = mouseX; selectEndY = mouseY;
+                  strokeHistory.forEach(s => s.isSelected = false);
+              }
+          } else if (!isSelecting && e.button === 0 && strokeHistory.some(s => s.isSelected)) {
+              if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+                  isResizing = true;
+                  resizeStartBounds = currentSelectionBounds;
+                  dragStartX = (resizeStartBounds.minX + resizeStartBounds.maxX) / 2;
+                  dragStartY = (resizeStartBounds.minY + resizeStartBounds.maxY) / 2;
+              } else if (currentSelectionBounds && isPointNearSelectedStrokes(worldX, worldY)) {
+                  isDragging = true;
+                  dragStartX = worldX; dragStartY = worldY;
+              }
+          }
 
-           // --- Draw / Pan / Zoom Logic ---
-           if (!isDragging && !isResizing && !isDrawingSelection) {
-               if (e.button === 0 && isMKeyPressed) { isPanning = true; lastPanX = e.clientX; lastPanY = e.clientY; }
-               else if (e.button === 0 && isNKeyPressed) { isZooming = true; lastPanY = e.clientY; }
-               else if (e.button === 0 && !isSpacePressed) {
-                   if (!currentSelectionBounds || !isPointNearSelectedStrokes(worldX, worldY)) {
-                       isDrawing = true;
-                       currentStrokeColor = colorPicker.value;
-                       currentStrokeLineWidth = parseFloat(brushSize.value);
-                       currentStrokeCommands = [['M', worldX, worldY]]; // Use raw numbers temporarily
-                       currentStrokeSVG = `M ${worldX.toFixed(2)} ${worldY.toFixed(2)}`; // Start SVG string
-                       drawCurrentStrokeSegment();
-                   }
-               } else if (e.button === 2) {
-                   isErasing = true;
-                   eraseStroke(worldX, worldY);
-               }
-           }
-           updateCursor(mouseX, mouseY);
-       });
+          if (!isDragging && !isResizing && !isDrawingSelection) {
+              if (e.button === 0 && isMKeyPressed) { isPanning = true; lastPanX = e.clientX; lastPanY = e.clientY; }
+              else if (e.button === 0 && isNKeyPressed) { isZooming = true; lastPanY = e.clientY; }
+              else if (e.button === 0 && !isSpacePressed) {
+                  if (!currentSelectionBounds || !isPointNearSelectedStrokes(worldX, worldY)) {
+                      isDrawing = true;
+                      currentStrokeColor = colorPicker.value;
+                      currentStrokeLineWidth = parseFloat(brushSize.value);
+                      currentStrokeCommands = [['M', worldX, worldY]];
+                      currentStrokeSVG = `M ${worldX.toFixed(2)} ${worldY.toFixed(2)}`;
+                      drawCurrentStrokeSegment();
+                  }
+              } else if (e.button === 2) {
+                  isErasing = true;
+                  eraseStroke(worldX, worldY);
+              }
+          }
+          updateCursor(mouseX, mouseY);
+      });
 
-       canvas.addEventListener('pointermove', (e) => {
-           const mouseX = e.offsetX;
-           const mouseY = e.offsetY;
-           const worldX = (mouseX - offsetX) / scale;
-           const worldY = (mouseY - offsetY) / scale;
+      canvas.addEventListener('pointermove', (e) => {
+          const mouseX = e.offsetX;
+          const mouseY = e.offsetY;
+          const worldX = (mouseX - offsetX) / scale;
+          const worldY = (mouseY - offsetY) / scale;
 
-           if (isPanning) { /* Keep panning logic */
-               const deltaX = e.clientX - lastPanX, deltaY = e.clientY - lastPanY;
-               offsetX += deltaX; offsetY += deltaY;
-               lastPanX = e.clientX; lastPanY = e.clientY;
-               redrawCanvas();
-           } else if (isZooming) { /* Keep zooming logic */
-               const deltaY = e.clientY - lastPanY;
-               const zoomFactor = 1 - deltaY * 0.005;
-               const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
-               const worldXBefore = (mouseX - offsetX) / scale;
-               const worldYBefore = (mouseY - offsetY) / scale;
-               scale = newScale;
-               offsetX = mouseX - worldXBefore * scale;
-               offsetY = mouseY - worldYBefore * scale;
-               lastPanY = e.clientY;
-               redrawCanvas();
-           } else if (isDrawingSelection) { /* Keep drawing selection logic */
-               selectEndX = mouseX; selectEndY = mouseY;
-               redrawCanvas();
-           } else if (isDragging) { /* Keep dragging logic */
-               const deltaX = worldX - dragStartX;
-               const deltaY = worldY - dragStartY;
-               const translationMatrix = new DOMMatrix().translate(deltaX, deltaY);
-               strokeHistory.forEach(strokeInfo => {
-                   if (strokeInfo.isSelected) strokeInfo.transform = translationMatrix.multiply(strokeInfo.transform);
-               });
-               dragStartX = worldX; dragStartY = worldY;
-               redrawCanvas();
-           } else if (isResizing && resizeStartBounds) { /* Keep resizing logic (relative to center) */
-               const currentCenterX = dragStartX; // Center stored in dragStart for resize
-               const currentCenterY = dragStartY;
-               const initialHandleX = resizeStartBounds.maxX;
-               const initialHandleY = resizeStartBounds.maxY;
-               const distInitialX = initialHandleX - currentCenterX;
-               const distInitialY = initialHandleY - currentCenterY;
-               const distCurrentX = worldX - currentCenterX;
-               const distCurrentY = worldY - currentCenterY;
+          if (isPanning) {
+              const deltaX = e.clientX - lastPanX, deltaY = e.clientY - lastPanY;
+              offsetX += deltaX; offsetY += deltaY;
+              lastPanX = e.clientX; lastPanY = e.clientY;
+              redrawCanvas();
+          } else if (isZooming) {
+              const deltaY = e.clientY - lastPanY;
+              const zoomFactor = 1 - deltaY * 0.005;
+              const newScale = Math.max(minScale, Math.min(maxScale, scale * zoomFactor));
+              const worldXBefore = (mouseX - offsetX) / scale;
+              const worldYBefore = (mouseY - offsetY) / scale;
+              scale = newScale;
+              offsetX = mouseX - worldXBefore * scale;
+              offsetY = mouseY - worldYBefore * scale;
+              lastPanY = e.clientY;
+              redrawCanvas();
+          } else if (isDrawingSelection) {
+              selectEndX = mouseX; selectEndY = mouseY;
+              redrawCanvas();
+          } else if (isDragging) {
+              const deltaX = worldX - dragStartX;
+              const deltaY = worldY - dragStartY;
+              const translationMatrix = new DOMMatrix().translate(deltaX, deltaY);
+              strokeHistory.forEach(strokeInfo => {
+                  if (strokeInfo.isSelected) strokeInfo.transform = translationMatrix.multiply(strokeInfo.transform);
+              });
+              dragStartX = worldX; dragStartY = worldY;
+              redrawCanvas();
+          } else if (isResizing && resizeStartBounds) {
+              const currentCenterX = dragStartX;
+              const currentCenterY = dragStartY;
+              const initialHandleX = resizeStartBounds.maxX;
+              const initialHandleY = resizeStartBounds.maxY;
+              const distInitialX = initialHandleX - currentCenterX;
+              const distInitialY = initialHandleY - currentCenterY;
+              const distCurrentX = worldX - currentCenterX;
+              const distCurrentY = worldY - currentCenterY;
 
-               let scaleFactor = 1;
-               // Calculate scale based on the axis with larger initial distance from center
-               if (Math.abs(distInitialX) > Math.abs(distInitialY)) {
-                  scaleFactor = Math.abs(distInitialX) < 1e-6 ? 1 : distCurrentX / distInitialX;
-               } else {
-                  scaleFactor = Math.abs(distInitialY) < 1e-6 ? 1 : distCurrentY / distInitialY;
-               }
-               scaleFactor = Math.max(0.01, scaleFactor); // Clamp scale
+              let scaleFactor = 1;
+              if (Math.abs(distInitialX) > Math.abs(distInitialY)) {
+                scaleFactor = Math.abs(distInitialX) < 1e-6 ? 1 : distCurrentX / distInitialX;
+              } else {
+                scaleFactor = Math.abs(distInitialY) < 1e-6 ? 1 : distCurrentY / distInitialY;
+              }
+              scaleFactor = Math.max(0.01, scaleFactor);
 
-               const scaleMatrix = new DOMMatrix()
-                   .translate(currentCenterX, currentCenterY)
-                   .scale(scaleFactor)
-                   .translate(-currentCenterX, -currentCenterY);
+              const scaleMatrix = new DOMMatrix()
+                  .translate(currentCenterX, currentCenterY)
+                  .scale(scaleFactor)
+                  .translate(-currentCenterX, -currentCenterY);
 
-               strokeHistory.forEach(strokeInfo => {
-                   if (strokeInfo.isSelected) {
-                       strokeInfo.transform = scaleMatrix.multiply(strokeInfo.transform);
-                       // NOTE: baseLineWidth is NOT scaled here, preserving original width regardless of transform scale
-                   }
-               });
+              strokeHistory.forEach(strokeInfo => {
+                  if (strokeInfo.isSelected) {
+                      strokeInfo.transform = scaleMatrix.multiply(strokeInfo.transform);
+                  }
+              });
 
-               // Update resizeStartBounds conceptually for next iteration (needed if scaling non-uniformly or rotating)
-               resizeStartBounds = transformBounds(scaleMatrix, resizeStartBounds);
+              resizeStartBounds = transformBounds(scaleMatrix, resizeStartBounds);
+              redrawCanvas();
+          } else if (isDrawing) {
+              const lastCmd = currentStrokeCommands[currentStrokeCommands.length - 1];
+              if (Math.hypot(worldX - lastCmd[1], worldY - lastCmd[2]) > 0.5) {
+                  currentStrokeCommands.push(['L', worldX, worldY]);
+                  currentStrokeSVG += ` L ${worldX.toFixed(2)} ${worldY.toFixed(2)}`;
+                  drawCurrentStrokeSegment();
+              }
+          } else if (isErasing) {
+              eraseStroke(worldX, worldY);
+          } else {
+              updateCursor(mouseX, mouseY);
+          }
+      });
 
-               redrawCanvas();
-           } else if (isDrawing) { /* Keep drawing logic */
-               const lastCmd = currentStrokeCommands[currentStrokeCommands.length - 1];
-               if (Math.hypot(worldX - lastCmd[1], worldY - lastCmd[2]) > 0.5) { // Add if moved enough
-                   currentStrokeCommands.push(['L', worldX, worldY]); // Store raw numbers
-                   currentStrokeSVG += ` L ${worldX.toFixed(2)} ${worldY.toFixed(2)}`; // Append formatted SVG
-                   drawCurrentStrokeSegment();
-               }
-           } else if (isErasing) { /* Keep erasing logic */
-               eraseStroke(worldX, worldY);
-           } else {
-               updateCursor(mouseX, mouseY);
-           }
-       });
+      canvas.addEventListener('pointerup', (e) => {
+          if (isDrawing) {
+              isDrawing = false;
+              if (currentStrokeCommands.length > 1) {
+                  const finalSvgData = createSvgPathString(currentStrokeCommands);
+                  const newPath = new Path2D(finalSvgData);
+                  const bounds = computeBoundsFromPoints(currentStrokeCommands.map(cmd => ({x:cmd[1], y:cmd[2]})), currentStrokeLineWidth);
+                  strokeHistory.push({
+                      path: newPath, svgPath: finalSvgData, color: currentStrokeColor, baseLineWidth: currentStrokeLineWidth,
+                      transform: new DOMMatrix(), isSelected: false, originalBounds: bounds
+                  });
+              }
+              currentStrokeCommands = []; currentStrokeSVG = "";
+              redrawCanvas();
+          }
+          if (isErasing) isErasing = false;
+          if (isDrawingSelection) {
+              isDrawingSelection = false;
+              selectStrokesInRectangle();
+              redrawCanvas();
+          }
+          if (isDragging) isDragging = false;
+          if (isResizing) isResizing = false;
+          isPanning = false; isZooming = false;
+          updateCursor(e.offsetX, e.offsetY);
+      });
 
-       canvas.addEventListener('pointerup', (e) => {
-           if (isDrawing) {
-               isDrawing = false;
-               if (currentStrokeCommands.length > 1) {
-                   // Finalize SVG path string using formatted numbers
-                   const finalSvgData = createSvgPathString(currentStrokeCommands);
-                   const newPath = new Path2D(finalSvgData);
-                   // Compute bounds from temporary points
-                   const bounds = computeBoundsFromPoints(currentStrokeCommands.map(cmd => ({x:cmd[1], y:cmd[2]})), currentStrokeLineWidth);
+      canvas.addEventListener('pointerleave', () => {
+          if (isDrawing) {
+              isDrawing = false;
+              if (currentStrokeCommands.length > 1) {
+                  const finalSvgData = createSvgPathString(currentStrokeCommands);
+                  const newPath = new Path2D(finalSvgData);
+                  const bounds = computeBoundsFromPoints(currentStrokeCommands.map(cmd => ({x:cmd[1], y:cmd[2]})), currentStrokeLineWidth);
+                  strokeHistory.push({
+                      path: newPath, svgPath: finalSvgData, color: currentStrokeColor, baseLineWidth: currentStrokeLineWidth,
+                      transform: new DOMMatrix(), isSelected: false, originalBounds: bounds
+                  });
+              }
+              currentStrokeCommands = []; currentStrokeSVG = "";
+              redrawCanvas();
+          }
+          isPanning = false; isZooming = false; isErasing = false;
+          isDrawingSelection = false; isDragging = false; isResizing = false;
+          updateCursor();
+      });
 
-                   strokeHistory.push({
-                       path: newPath, svgPath: finalSvgData, color: currentStrokeColor,
-                       baseLineWidth: currentStrokeLineWidth, transform: new DOMMatrix(),
-                       isSelected: false, originalBounds: bounds
-                   });
-               }
-               currentStrokeCommands = []; currentStrokeSVG = "";
-               redrawCanvas();
-           }
-           if (isErasing) isErasing = false;
-           if (isDrawingSelection) {
-               isDrawingSelection = false;
-               selectStrokesInRectangle();
-               redrawCanvas();
-           }
-           if (isDragging) isDragging = false;
-           if (isResizing) isResizing = false;
-           isPanning = false; isZooming = false;
-           updateCursor(e.offsetX, e.offsetY);
-       });
+      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-       canvas.addEventListener('pointerleave', () => {
-           // Treat leave like pointerup for drawing
-           if (isDrawing) {
-               isDrawing = false;
-                if (currentStrokeCommands.length > 1) {
-                   const finalSvgData = createSvgPathString(currentStrokeCommands);
-                   const newPath = new Path2D(finalSvgData);
-                   const bounds = computeBoundsFromPoints(currentStrokeCommands.map(cmd => ({x:cmd[1], y:cmd[2]})), currentStrokeLineWidth);
-                   strokeHistory.push({ path: newPath, svgPath: finalSvgData, color: currentStrokeColor, baseLineWidth: currentStrokeLineWidth, transform: new DOMMatrix(), isSelected: false, originalBounds: bounds });
-                }
-               currentStrokeCommands = []; currentStrokeSVG = "";
-               redrawCanvas();
-           }
-           // Reset other states
-           isPanning = false; isZooming = false; isErasing = false;
-           isDrawingSelection = false; isDragging = false; isResizing = false;
-           updateCursor();
-       });
-
-       canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-
-       // --- Helper: Draw current stroke segment (feedback) ---
-       // (Keep existing - uses currentStrokeSVG)
-       function drawCurrentStrokeSegment() {
-           if (!currentStrokeSVG) return;
-           const tempPath = new Path2D(currentStrokeSVG);
-           ctx.save();
-           ctx.translate(offsetX, offsetY); ctx.scale(scale, scale);
-           ctx.strokeStyle = currentStrokeColor;
-           ctx.lineWidth = currentStrokeLineWidth;
-           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-           ctx.stroke(tempPath);
-           ctx.restore();
-       }
-
-      // --- Erasing ---
-      // (Keep existing erase logic - uses matrix inversion and isPointInStroke)
-       function eraseStroke(worldX, worldY) {
-           let erased = false;
-           for (let i = strokeHistory.length - 1; i >= 0; i--) {
-               const strokeInfo = strokeHistory[i];
-               try {
-                   const inverseMatrix = strokeInfo.transform.inverse();
-                   const localPoint = transformPoint(inverseMatrix, worldX, worldY);
-                   const t = strokeInfo.transform;
-                   const approxScale = (Math.sqrt(t.a**2 + t.c**2) + Math.sqrt(t.b**2 + t.d**2))/2 || 1;
-                   const hitWidth = (strokeInfo.baseLineWidth / 2 + ERASE_RADIUS) / (scale * approxScale) ;
-
-                   ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1; // Ensure positive width
-                   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-
-                   if (ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y)) {
-                       strokeHistory.splice(i, 1);
-                       erased = true;
-                   }
-               } catch (error) { console.error("Error during erase hit test:", error); }
-           }
-           if (erased) redrawCanvas();
-       }
-
-
-      // --- Selection ---
-      // (Keep existing selection logic - uses isSelected flag)
-       function selectStrokesInRectangle() {
-           const rectMinX = Math.min(selectStartX, selectEndX);
-           const rectMaxX = Math.max(selectStartX, selectEndX);
-           const rectMinY = Math.min(selectStartY, selectEndY);
-           const rectMaxY = Math.max(selectStartY, selectEndY);
-
-           strokeHistory.forEach(strokeInfo => {
-                if (strokeInfo.originalBounds) {
-                   const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
-                   if (currentBounds) {
-                       const screenBoundsMinX = currentBounds.minX * scale + offsetX;
-                       const screenBoundsMaxX = currentBounds.maxX * scale + offsetX;
-                       const screenBoundsMinY = currentBounds.minY * scale + offsetY;
-                       const screenBoundsMaxY = currentBounds.maxY * scale + offsetY;
-
-                       if (screenBoundsMaxX >= rectMinX && screenBoundsMinX <= rectMaxX &&
-                           screenBoundsMaxY >= rectMinY && screenBoundsMinY <= rectMaxY) {
-                           strokeInfo.isSelected = true;
-                       } // else keep current isSelected state (or set to false if not additive)
-                   }
-               } // else cannot check bounds accurately
-           });
-       }
-
-       function isPointNearSelectedStrokes(worldX, worldY) {
-           return strokeHistory.some(strokeInfo => {
-               if (!strokeInfo.isSelected) return false;
-               try {
-                   const inverseMatrix = strokeInfo.transform.inverse();
-                   const localPoint = transformPoint(inverseMatrix, worldX, worldY);
-                   const t = strokeInfo.transform;
-                   const approxScale = (Math.sqrt(t.a**2 + t.c**2) + Math.sqrt(t.b**2 + t.d**2))/2 || 1;
-                   const hitWidth = (strokeInfo.baseLineWidth / 2 + HITBOX_SIZE / 2) / (scale * approxScale);
-
-                   ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1;
-                   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                   return ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y);
-               } catch (e) { console.warn("Matrix non-invertible?", e); return false; }
-           });
-       }
-
-       function isPointNearResizeHandle(mouseX, mouseY, selectionBounds) {
-           if (!selectionBounds) return false;
-           const handleScreenX = selectionBounds.maxX * scale + offsetX;
-           const handleScreenY = selectionBounds.maxY * scale + offsetY;
-           const dx = mouseX - handleScreenX;
-           const dy = mouseY - handleScreenY;
-           return Math.sqrt(dx * dx + dy * dy) < HITBOX_SIZE / 2;
-       }
-
-
-      // --- Drawing Helpers ---
-      // (Keep existing helpers, ensure they use current bounds)
-       function drawSelectionRectangle() { /* Keep existing */
-         if (isDrawingSelection) {
-           ctx.save();
-           ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
-           ctx.strokeRect(selectStartX, selectStartY, selectEndX - selectStartX, selectEndY - selectStartY);
-           ctx.restore();
-         }
-       }
-       function highlightSelectedStrokes() { /* Keep existing */
-         const selectionBounds = getSelectionBounds();
-         if (selectionBounds) {
-             ctx.save();
-             ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-             const screenMinX = selectionBounds.minX * scale + offsetX;
-             const screenMaxX = selectionBounds.maxX * scale + offsetX;
-             const screenMinY = selectionBounds.minY * scale + offsetY;
-             const screenMaxY = selectionBounds.maxY * scale + offsetY;
-             ctx.strokeRect(screenMinX, screenMinY, screenMaxX - screenMinX, screenMaxY - screenMinY);
-             ctx.restore();
-         }
-       }
-       function drawHandles() { /* Keep existing */
-         const selectionBounds = getSelectionBounds();
-         if (selectionBounds && strokeHistory.some(s => s.isSelected) && (!isSpacePressed || isDragging || isResizing)) {
-           ctx.save();
-           const handleScreenX = selectionBounds.maxX * scale + offsetX;
-           const handleScreenY = selectionBounds.maxY * scale + offsetY;
-           ctx.fillStyle = '#FFF'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
-           ctx.beginPath(); ctx.rect(handleScreenX - HANDLE_SIZE / 2, handleScreenY - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
-           ctx.fill(); ctx.stroke();
-           ctx.restore();
-         }
-       }
-       function updateCursor(mouseX, mouseY) { /* Keep existing */
-           let cursor = 'crosshair';
-           const anySelected = strokeHistory.some(s => s.isSelected);
-           const currentSelectionBounds = anySelected ? getSelectionBounds() : null;
-
-           if (isPanning || (isMKeyPressed && !isDrawing && !isResizing && !isDragging && !isDrawingSelection)) cursor = 'move';
-           else if (isZooming || (isNKeyPressed && !isDrawing && !isResizing && !isDragging && !isDrawingSelection)) cursor = 'ns-resize';
-           else if (isErasing) cursor = 'crosshair';
-           else if (isDragging) cursor = 'move';
-           else if (isResizing) cursor = 'se-resize';
-           else if (isSelecting && !isDrawingSelection && !isDragging && !isResizing) {
-               if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) cursor = 'se-resize';
-               else if (currentSelectionBounds && mouseX !== undefined && isPointNearSelectedStrokes((mouseX - offsetX) / scale, (mouseY - offsetY) / scale)) cursor = 'move';
-               else cursor = 'crosshair';
-           } else if (anySelected && !isSpacePressed && mouseX !== undefined) {
-                if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) cursor = 'se-resize';
-                else if (currentSelectionBounds && isPointNearSelectedStrokes((mouseX - offsetX) / scale, (mouseY - offsetY) / scale)) cursor = 'move';
-           }
-           if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+      // --- Helper: Draw current stroke segment ---
+      function drawCurrentStrokeSegment() {
+          if (!currentStrokeSVG) return;
+          const tempPath = new Path2D(currentStrokeSVG);
+          ctx.save();
+          ctx.translate(offsetX, offsetY); ctx.scale(scale, scale);
+          ctx.strokeStyle = currentStrokeColor;
+          ctx.lineWidth = currentStrokeLineWidth;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.stroke(tempPath);
+          ctx.restore();
       }
 
+      // --- Erasing ---
+      function eraseStroke(worldX, worldY) {
+          let erased = false;
+          for (let i = strokeHistory.length - 1; i >= 0; i--) {
+              const strokeInfo = strokeHistory[i];
+              try {
+                  const inverseMatrix = strokeInfo.transform.inverse();
+                  const localPoint = transformPoint(inverseMatrix, worldX, worldY);
+                  const t = strokeInfo.transform;
+                  const approxScale = (Math.sqrt(t.a**2 + t.c**2) + Math.sqrt(t.b**2 + t.d**2))/2 || 1;
+                  const hitWidth = (strokeInfo.baseLineWidth / 2 + ERASE_RADIUS) / (scale * approxScale);
+
+                  ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1;
+                  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                  if (ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y)) {
+                      strokeHistory.splice(i, 1);
+                      erased = true;
+                  }
+              } catch (error) { console.error("Error during erase hit test:", error); }
+          }
+          if (erased) redrawCanvas();
+      }
+
+      // --- Selection ---
+      function selectStrokesInRectangle() {
+          const rectMinX = Math.min(selectStartX, selectEndX);
+          const rectMaxX = Math.max(selectStartX, selectEndX);
+          const rectMinY = Math.min(selectStartY, selectEndY);
+          const rectMaxY = Math.max(selectStartY, selectEndY);
+
+          strokeHistory.forEach(strokeInfo => {
+              if (strokeInfo.originalBounds) {
+                  const currentBounds = transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+                  if (currentBounds) {
+                      const screenBoundsMinX = currentBounds.minX * scale + offsetX;
+                      const screenBoundsMaxX = currentBounds.maxX * scale + offsetX;
+                      const screenBoundsMinY = currentBounds.minY * scale + offsetY;
+                      const screenBoundsMaxY = currentBounds.maxY * scale + offsetY;
+
+                      if (screenBoundsMaxX >= rectMinX && screenBoundsMinX <= rectMaxX &&
+                          screenBoundsMaxY >= rectMinY && screenBoundsMinY <= rectMaxY) {
+                          strokeInfo.isSelected = true;
+                      }
+                  }
+              }
+          });
+      }
+
+      function isPointNearSelectedStrokes(worldX, worldY) {
+          return strokeHistory.some(strokeInfo => {
+              if (!strokeInfo.isSelected) return false;
+              try {
+                  const inverseMatrix = strokeInfo.transform.inverse();
+                  const localPoint = transformPoint(inverseMatrix, worldX, worldY);
+                  const t = strokeInfo.transform;
+                  const approxScale = (Math.sqrt(t.a**2 + t.c**2) + Math.sqrt(t.b**2 + t.d**2))/2 || 1;
+                  const hitWidth = (strokeInfo.baseLineWidth / 2 + HITBOX_SIZE / 2) / (scale * approxScale);
+
+                  ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1;
+                  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                  return ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y);
+              } catch (e) { console.warn("Matrix non-invertible?", e); return false; }
+          });
+      }
+
+      function isPointNearResizeHandle(mouseX, mouseY, selectionBounds) {
+          if (!selectionBounds) return false;
+          const handleScreenX = selectionBounds.maxX * scale + offsetX;
+          const handleScreenY = selectionBounds.maxY * scale + offsetY;
+          const dx = mouseX - handleScreenX;
+          const dy = mouseY - handleScreenY;
+          return Math.sqrt(dx * dx + dy * dy) < HITBOX_SIZE / 2;
+      }
+
+      // --- Drawing Helpers ---
+      function drawSelectionRectangle() {
+        if (isDrawingSelection) {
+          ctx.save();
+          ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1; ctx.setLineDash([5, 5]);
+          ctx.strokeRect(selectStartX, selectStartY, selectEndX - selectStartX, selectEndY - selectStartY);
+          ctx.restore();
+        }
+      }
+
+      function highlightSelectedStrokes() {
+        const selectionBounds = getSelectionBounds();
+        if (selectionBounds) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+            const screenMinX = selectionBounds.minX * scale + offsetX;
+            const screenMaxX = selectionBounds.maxX * scale + offsetX;
+            const screenMinY = selectionBounds.minY * scale + offsetY;
+            const screenMaxY = selectionBounds.maxY * scale + offsetY;
+            ctx.strokeRect(screenMinX, screenMinY, screenMaxX - screenMinX, screenMaxY - screenMinY);
+            ctx.restore();
+        }
+      }
+
+      function drawHandles() {
+        const selectionBounds = getSelectionBounds();
+        if (selectionBounds && strokeHistory.some(s => s.isSelected) && (!isSpacePressed || isDragging || isResizing)) {
+          ctx.save();
+          const handleScreenX = selectionBounds.maxX * scale + offsetX;
+          const handleScreenY = selectionBounds.maxY * scale + offsetY;
+          ctx.fillStyle = '#FFF'; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.rect(handleScreenX - HANDLE_SIZE / 2, handleScreenY - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+          ctx.fill(); ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      function updateCursor(mouseX, mouseY) {
+          let cursor = 'crosshair';
+          const anySelected = strokeHistory.some(s => s.isSelected);
+          const currentSelectionBounds = anySelected ? getSelectionBounds() : null;
+
+          if (isPanning || (isMKeyPressed && !isDrawing && !isResizing && !isDragging && !isDrawingSelection)) cursor = 'move';
+          else if (isZooming || (isNKeyPressed && !isDrawing && !isResizing && !isDragging && !isDrawingSelection)) cursor = 'ns-resize';
+          else if (isErasing) cursor = 'crosshair';
+          else if (isDragging) cursor = 'move';
+          else if (isResizing) cursor = 'se-resize';
+          else if (isSelecting && !isDrawingSelection && !isDragging && !isResizing) {
+              if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) cursor = 'se-resize';
+              else if (currentSelectionBounds && mouseX !== undefined && isPointNearSelectedStrokes((mouseX - offsetX) / scale, (mouseY - offsetY) / scale)) cursor = 'move';
+              else cursor = 'crosshair';
+          } else if (anySelected && !isSpacePressed && mouseX !== undefined) {
+              if (currentSelectionBounds && isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) cursor = 'se-resize';
+              else if (currentSelectionBounds && isPointNearSelectedStrokes((mouseX - offsetX) / scale, (mouseY - offsetY) / scale)) cursor = 'move';
+          }
+          if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+      }
 
       // --- Core Drawing Function ---
-      // (Keep existing redrawCanvas logic - applies transforms and strokes paths)
-       function redrawCanvas() {
-           ctx.clearRect(0, 0, canvas.width, canvas.height);
-           strokeHistory.forEach(strokeInfo => {
-               ctx.save();
-               ctx.translate(offsetX, offsetY); ctx.scale(scale, scale); // Global view transform
-               const t = strokeInfo.transform;
-               ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f); // Stroke's transform
+      function redrawCanvas() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          strokeHistory.forEach(strokeInfo => {
+              ctx.save();
+              ctx.translate(offsetX, offsetY); ctx.scale(scale, scale);
+              const t = strokeInfo.transform;
+              ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
 
-               ctx.strokeStyle = strokeInfo.color;
-               ctx.lineWidth = strokeInfo.baseLineWidth; // Use base width - transform scales it visually
-               ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-               ctx.fillStyle = 'none'; // Important for SVG paths
+              ctx.strokeStyle = strokeInfo.color;
+              ctx.lineWidth = strokeInfo.baseLineWidth;
+              ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+              ctx.fillStyle = 'none';
 
-               ctx.stroke(strokeInfo.path);
-               ctx.restore();
-           });
-           highlightSelectedStrokes();
-           drawSelectionRectangle();
-           drawHandles();
-       }
-
+              ctx.stroke(strokeInfo.path);
+              ctx.restore();
+          });
+          highlightSelectedStrokes();
+          drawSelectionRectangle();
+          drawHandles();
+      }
 
       // --- Actions ---
-      function undoLastStroke() { /* Keep existing */
+      function undoLastStroke() {
         if (strokeHistory.length > 0) {
           strokeHistory.pop();
           redrawCanvas();
         }
       }
-      function clearCanvas() { /* Keep existing */
+
+      function clearCanvas() {
         strokeHistory = [];
         currentStrokeCommands = []; currentStrokeSVG = "";
         offsetX = 0; offsetY = 0; scale = 1;
@@ -633,12 +628,12 @@
 
       // --- SVG Save/Load ---
       function saveCanvas() {
-          const bounds = getDrawingBounds() || { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height }; // Fallback bounds
+          const bounds = getDrawingBounds() || { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height };
           const vbX = bounds.minX;
           const vbY = bounds.minY;
           const vbW = bounds.maxX;
           const vbH = bounds.maxY;
-          const backgroundColor = "#15202B"; // @TODO: Get this from #drawingCanvas background-color
+          const backgroundColor = "#15202B";
 
           let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="100%" height="100%">\n
 <rect x="0" y="0" width="100%" height="100%" fill="${backgroundColor}"/>
@@ -646,7 +641,6 @@
 
           strokeHistory.forEach(strokeInfo => {
               const t = strokeInfo.transform;
-              // Check if matrix is effectively identity to omit transform attribute
               const isIdentity = Math.abs(t.a - 1) < 1e-6 && Math.abs(t.d - 1) < 1e-6 &&
                                  Math.abs(t.b) < 1e-6 && Math.abs(t.c) < 1e-6 &&
                                  Math.abs(t.e) < 1e-6 && Math.abs(t.f) < 1e-6;
@@ -668,15 +662,15 @@
               filename += ".svg";
           }
           const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-          saveAs(blob, filename); // Use FileSaver.js
+          saveAs(blob, filename);
       }
 
       function loadCanvas() {
           const file = fileInput.files[0];
           if (!file) return;
           if (!file.type.startsWith('image/svg+xml') && !file.name.toLowerCase().endsWith('.svg')) {
-               alert('Please select an SVG file (.svg)');
-               return;
+              alert('Please select an SVG file (.svg)');
+              return;
           }
 
           const reader = new FileReader();
@@ -691,26 +685,25 @@
                       throw new Error(`SVG parsing error: ${parserError.textContent}`);
                   }
 
-                  const pathElements = doc.querySelectorAll('svg > path'); // Look for direct children paths
-                  if (pathElements.length === 0 && doc.querySelector('svg')) {
-                       // Maybe paths are inside a <g> group? Handle basic case.
-                       pathElements = doc.querySelectorAll('svg > g > path');
+                  let pathElements = doc.querySelectorAll('svg > path');
+                  if (pathElements.length === 0) {
+                      pathElements = doc.querySelectorAll('svg > g > path');
                   }
 
-                  clearCanvas(); // Clear current drawing
+                  clearCanvas();
 
                   pathElements.forEach(pathEl => {
+                      console.log("Loading path", pathEl);
                       const d = pathEl.getAttribute('d');
-                      if (!d) return; // Skip paths without geometry
+                      if (!d) return;
 
                       const path = new Path2D(d);
-                      const color = pathEl.getAttribute('stroke') || '#FFFFFF'; // Default to white
-                      const lineWidth = parseFloat(pathEl.getAttribute('stroke-width') || '1'); // Default width 1
+                      const color = pathEl.getAttribute('stroke') || '#FFFFFF';
+                      const lineWidth = parseFloat(pathEl.getAttribute('stroke-width') || '1');
 
-                      let transform = new DOMMatrix(); // Identity by default
+                      let transform = new DOMMatrix();
                       const transformAttr = pathEl.getAttribute('transform');
                       if (transformAttr) {
-                          // Basic matrix parsing - assumes "matrix(a,b,c,d,e,f)" or "matrix(a b c d e f)"
                           const matrixValues = transformAttr.match(/matrix\(([^)]+)\)/);
                           if (matrixValues && matrixValues[1]) {
                               const nums = matrixValues[1].split(/[\s,]+/).map(Number);
@@ -720,13 +713,15 @@
                                   console.warn("Could not parse transform matrix:", transformAttr);
                               }
                           } else {
-                               // TODO: Handle other transform types like translate(), scale() if needed
-                               console.warn("Unsupported transform format:", transformAttr);
+                              console.warn("Unsupported transform format:", transformAttr);
                           }
                       }
 
-                      // OriginalBounds cannot be reliably recovered from standard SVG. Set to null.
-                      const originalBounds = null;
+                      // Compute originalBounds from SVG path
+                      const points = parseSvgPathToPoints(d);
+                      const originalBounds = points.length > 0
+                          ? computeBoundsFromPoints(points, lineWidth)
+                          : { minX: 0, maxX: 0, minY: 0, maxY: 0 }; // Fallback for empty paths
 
                       strokeHistory.push({
                           path: path,
@@ -739,30 +734,31 @@
                       });
                   });
 
-                   // Reset view after loading
-                   offsetX = 0; offsetY = 0; scale = 1;
+                  offsetX = 0; offsetY = 0; scale = 1;
                   redrawCanvas();
 
               } catch (err) {
                   console.error('Error loading or parsing SVG:', err);
                   alert(`Failed to load SVG: ${err.message}`);
-                  clearCanvas(); // Clear on error
+                  clearCanvas();
               }
           };
           reader.onerror = function() {
               console.error('Error reading file:', reader.error);
               alert('Failed to read the file.');
           };
-          reader.readAsText(file); // Read SVG as text
-          fileInput.value = ''; // Reset input
+          reader.readAsText(file);
+          fileInput.value = '';
       }
 
       fileInput.addEventListener('change', loadCanvas);
-      function toggleHelp() { helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block'; }
+
+      function toggleHelp() {
+        helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
+      }
 
       // Initial Draw
       redrawCanvas();
-
     </script>
   </body>
 </html>
