@@ -101,7 +101,7 @@
         <li><b>Deselect</b>: Press Esc to deselect all strokes or cancel selection rectangle.</li>
         <li><b>Stroke Bar</b>: Appears when strokes are selected. Edit attributes (color, brush size, fill, linecap, linejoin, dasharray, opacity, shadow, shadow color, link) for the selected stroke. Use dropdown or Tab key to cycle through selected strokes. Set fill to "None" to remove fill color.</li>
         <li><b>Cycle Strokes</b>: Press Tab to cycle through selected strokes in the stroke bar.</li>
-        <li><b>Link</b>: Edit the hyperlink for the current stroke in the stroke bar or press 'L' to set via prompt.</li>
+        <li><b>Link</b>: Edit the hyperlink for the current stroke in the stroke bar</li>
         <li><b>Colors</b>: Use keybinds 1-9 to select stroke colors for drawing or editing selected strokes.</li>
         <li><b>Save SVG</b>: Click "Save SVG" to download a standard .svg file, including shadows.</li>
         <li><b>Load SVG</b>: Click "Load SVG" to load a standard .svg file (resets view).</li>
@@ -136,17 +136,7 @@
         keybinds: {
           'm': { action: () => { DrawingModule.isMKeyPressed = true; }, release: () => { DrawingModule.isMKeyPressed = false; DrawingModule.isPanning = false; } },
           'n': { action: () => { DrawingModule.isNKeyPressed = true; }, release: () => { DrawingModule.isNKeyPressed = false; DrawingModule.isZooming = false; } },
-          'l': {
-            action: () => {
-              const link = prompt("Link: ");
-              if (link) {
-                DrawingModule.updateCurrentStroke({ link });
-              }
-            }
-          },
-          // @FIXME: I changed ' ' to 's' here to fix a bug in the color picker where
-          //   pressing space invokes the color picker instead drawing the selecting rectagle
-          's': {
+          ' ': {
             action: (e) => {
               e.preventDefault();
               DrawingModule.isSpacePressed = true;
@@ -159,7 +149,6 @@
               if (!DrawingModule.isDragging && !DrawingModule.isResizing) DrawingModule.redrawCanvas();
             }
           },
-          // @FIXME: I change 'Escape' to 'c' (mnemoic for clear selection) to fix a bug with the color picker
           'Escape': {
             action: (e) => {
               console.debug(`<${e.key}> invoked @`, this);
@@ -229,46 +218,46 @@
           });
           colorPicker.addEventListener('change', () => {
             this.currentStrokeColor = colorPicker.value;
-            DrawingModule.updateCurrentStroke({ color: this.currentStrokeColor });
+            DrawingModule.updateSelectedStrokes({ color: this.currentStrokeColor });
           });
           colorPicker.addEventListener('blur', () => {
           });
           brushSize.addEventListener('input', () => {
             this.currentStrokeLineWidth = parseFloat(brushSize.value);
-            DrawingModule.updateCurrentStroke({ baseLineWidth: this.currentStrokeLineWidth });
+            DrawingModule.updateSelectedStrokes({ baseLineWidth: this.currentStrokeLineWidth });
           });
           fillColorPicker.addEventListener('change', () => {
             this.currentFillColor = fillColorPicker.value;
-            DrawingModule.updateCurrentStroke({ fill: this.currentFillColor });
+            DrawingModule.updateSelectedStrokes({ fill: this.currentFillColor });
           });
           strokeLinecap.addEventListener('change', () => {
             this.currentStrokeLinecap = strokeLinecap.value;
-            DrawingModule.updateCurrentStroke({ strokeLinecap: this.currentStrokeLinecap });
+            DrawingModule.updateSelectedStrokes({ strokeLinecap: this.currentStrokeLinecap });
           });
           strokeLinejoin.addEventListener('change', () => {
             this.currentStrokeLinejoin = strokeLinejoin.value;
-            DrawingModule.updateCurrentStroke({ strokeLinejoin: this.currentStrokeLinejoin });
+            DrawingModule.updateSelectedStrokes({ strokeLinejoin: this.currentStrokeLinejoin });
           });
           strokeDasharray.addEventListener('change', () => {
             this.currentStrokeDasharray = strokeDasharray.value;
-            DrawingModule.updateCurrentStroke({ strokeDasharray: this.currentStrokeDasharray });
+            DrawingModule.updateSelectedStrokes({ strokeDasharray: this.currentStrokeDasharray });
           });
           opacity.addEventListener('input', () => {
             this.currentOpacity = parseFloat(opacity.value);
-            DrawingModule.updateCurrentStroke({ opacity: this.currentOpacity });
+            DrawingModule.updateSelectedStrokes({ opacity: this.currentOpacity });
           });
           shadowFilter.addEventListener('change', () => {
             this.currentShadowFilter = shadowFilter.value;
-            DrawingModule.updateCurrentStroke({ filter: this.currentShadowFilter });
+            DrawingModule.updateSelectedStrokes({ filter: this.currentShadowFilter });
           });
           shadowColorPicker.addEventListener('change', () => {
             this.currentShadowColor = shadowColorPicker.value;
-            DrawingModule.updateCurrentStroke({ shadowColor: this.currentShadowColor });
+            DrawingModule.updateSelectedStrokes({ shadowColor: this.currentShadowColor });
             DrawingModule.redrawCanvas();
           });
           strokeLink.addEventListener('input', () => {
             this.currentLink = strokeLink.value.trim();
-            DrawingModule.updateCurrentStroke({ link: this.currentLink });
+            DrawingModule.updateSelectedStrokes({ link: this.currentLink });
           });
           strokeSelect.addEventListener('change', () => {
             const index = parseInt(strokeSelect.value);
@@ -306,7 +295,7 @@
         selectColor(color) {
           document.getElementById('colorPicker').value = color;
           this.currentStrokeColor = color;
-          DrawingModule.updateCurrentStroke({ color: this.currentStrokeColor });
+          DrawingModule.updateSelectedStrokes({ color: this.currentStrokeColor });
         },
 
         getState() {
