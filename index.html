@@ -9,7 +9,7 @@
       body { margin: 0; overflow: hidden; background: #15202B; }
       #drawingCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
       #controls { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: white; }
-      #strokeBar { position: absolute; top: 160px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: white; display: none; }
+      #strokeBar { position: absolute; top: 110px; left: 10px; z-index: 10; background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px; color: white; display: none; }
       #controls button, #controls input, #strokeBar input, #strokeBar select { margin: 5px; }
       .colorButton { width: 30px; height: 30px; border: none; cursor: pointer; }
       #helpPanel { display: none; position: absolute; top: 50px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; padding: 15px; border-radius: 5px; max-width: 400px; z-index: 10; }
@@ -28,10 +28,10 @@
     </div>
     <!-- Stroke Bar: Controls for editing stroke attributes, shown only when strokes are selected -->
     <div id="strokeBar">
-      <label>Selected Stroke: 
+      <label>Selected: 
         <select id="strokeSelect"></select>
       </label>
-      <label>Stroke Color: <input type="color" id="colorPicker" value="#FFFFFF"></label>
+      <label>Color: <input type="color" id="colorPicker" value="#FFFFFF"></label>
       <div id="colorButtons">
         <button class="colorButton" style="background: #FFFFFF;" onclick="SettingsModule.selectColor('#FFFFFF')"></button>
         <button class="colorButton" style="background: #FF0000;" onclick="SettingsModule.selectColor('#FF0000')"></button>
@@ -44,27 +44,39 @@
         <button class="colorButton" style="background: #FF00FF;" onclick="SettingsModule.selectColor('#FF00FF')"></button>
       </div>
       <label>Brush Size: <input type="range" id="brushSize" min="1" max="50" value="5"></label>
-      <label>Fill Color: <input type="color" id="fillColorPicker" value="#000000"></label>
-      <label>Stroke Linecap: 
+      <label>Fill: 
+        <select id="fillColorPicker">
+          <option value="none">None</option>
+          <option value="#000000">Black</option>
+          <option value="#FFFFFF">White</option>
+          <option value="#FF0000">Red</option>
+          <option value="#00FF00">Green</option>
+          <option value="#0000FF">Blue</option>
+        </select>
+      </label>
+      <label>Linecap: 
         <select id="strokeLinecap">
           <option value="round">Round</option>
           <option value="butt">Butt</option>
           <option value="square">Square</option>
         </select>
       </label>
-      <label>Stroke Linejoin: 
+      <label>Linejoin: 
         <select id="strokeLinejoin">
           <option value="round">Round</option>
           <option value="miter">Miter</option>
           <option value="bevel">Bevel</option>
         </select>
       </label>
-      <label>Stroke Dasharray: 
+      <label>Dasharray: 
         <select id="strokeDasharray">
           <option value="">None</option>
           <option value="5,5">Dashed</option>
+          <option value="10,10">Long Dash</option>
           <option value="1,5">Dotted</option>
+          <option value="2,2">Dense Dotted</option>
           <option value="10,5,2,5">Dash-Dot</option>
+          <option value="15,10,5,10">Sparse Dash-Dot</option>
         </select>
       </label>
       <label>Opacity: <input type="range" id="opacity" min="0" max="1" step="0.1" value="1"></label>
@@ -87,11 +99,11 @@
         <li><b>Undo</b>: Ctrl+Z (undoes last stroke).</li>
         <li><b>Select & Transform</b>: Hold Space to enter selection mode. Drag to draw a rectangle selecting multiple strokes. Drag with mouse to move selected strokes, or drag bottom-right handle to resize. Release Space to exit. Selected strokes remain active.</li>
         <li><b>Deselect</b>: Press Esc to deselect all strokes or cancel selection rectangle.</li>
-        <li><b>Stroke Bar</b>: Appears when strokes are selected. Edit attributes (color, width, fill, linecap, linejoin, dasharray, opacity, shadow, shadow color, link) for the selected stroke. Use dropdown or Tab key to cycle through selected strokes.</li>
+        <li><b>Stroke Bar</b>: Appears when strokes are selected. Edit attributes (color, brush size, fill, linecap, linejoin, dasharray, opacity, shadow, shadow color, link) for the selected stroke. Use dropdown or Tab key to cycle through selected strokes. Set fill to "None" to remove fill color.</li>
         <li><b>Cycle Strokes</b>: Press Tab to cycle through selected strokes in the stroke bar.</li>
         <li><b>Link</b>: Edit the hyperlink for the current stroke in the stroke bar or press 'L' to set via prompt.</li>
         <li><b>Colors</b>: Use keybinds 1-9 to select stroke colors for drawing or editing selected strokes.</li>
-        <li><b>Save SVG</b>: Click "Save SVG" to download a standard .svg file.</li>
+        <li><b>Save SVG</b>: Click "Save SVG" to download a standard .svg file, including shadows.</li>
         <li><b>Load SVG</b>: Click "Load SVG" to load a standard .svg file (resets view).</li>
         <li><b>Autosave</b>: State is saved to local storage every N seconds (configurable in controls, default 10s).</li>
       </ul>
@@ -215,7 +227,7 @@
             StateModule.saveState();
           });
           fillColorPicker.addEventListener('change', () => {
-            this.currentFillColor = fillColorPicker.value || 'none';
+            this.currentFillColor = fillColorPicker.value;
             DrawingModule.updateCurrentStroke({ fill: this.currentFillColor });
           });
           strokeLinecap.addEventListener('change', () => {
@@ -269,7 +281,7 @@
           this.currentStrokeColor = colorPicker.value;
           this.currentStrokeLineWidth = parseFloat(brushSize.value);
           this.backgroundColor = backgroundColorPicker.value;
-          this.currentFillColor = fillColorPicker.value || 'none';
+          this.currentFillColor = fillColorPicker.value;
           this.currentStrokeLinecap = strokeLinecap.value;
           this.currentStrokeLinejoin = strokeLinejoin.value;
           this.currentStrokeDasharray = strokeDasharray.value;
@@ -321,7 +333,7 @@
           document.getElementById('colorPicker').value = this.currentStrokeColor;
           document.getElementById('brushSize').value = this.currentStrokeLineWidth;
           document.getElementById('backgroundColorPicker').value = this.backgroundColor;
-          document.getElementById('fillColorPicker').value = this.currentFillColor === 'none' ? '#000000' : this.currentFillColor;
+          document.getElementById('fillColorPicker').value = this.currentFillColor;
           document.getElementById('strokeLinecap').value = this.currentStrokeLinecap;
           document.getElementById('strokeLinejoin').value = this.currentStrokeLinejoin;
           document.getElementById('strokeDasharray').value = this.currentStrokeDasharray;
@@ -417,9 +429,27 @@
               this.updateStrokeBar();
               StateModule.saveState();
             }
-          } else if (attributes.color) {
-            SettingsModule.currentStrokeColor = attributes.color;
-            document.getElementById('colorPicker').value = attributes.color;
+          } else {
+            if (attributes.color) SettingsModule.currentStrokeColor = attributes.color;
+            if (attributes.baseLineWidth) SettingsModule.currentStrokeLineWidth = attributes.baseLineWidth;
+            if (attributes.fill) SettingsModule.currentFillColor = attributes.fill;
+            if (attributes.strokeLinecap) SettingsModule.currentStrokeLinecap = attributes.strokeLinecap;
+            if (attributes.strokeLinejoin) SettingsModule.currentStrokeLinejoin = attributes.strokeLinejoin;
+            if (attributes.strokeDasharray) SettingsModule.currentStrokeDasharray = attributes.strokeDasharray;
+            if (attributes.opacity) SettingsModule.currentOpacity = attributes.opacity;
+            if (attributes.filter) SettingsModule.currentShadowFilter = attributes.filter;
+            if (attributes.shadowColor) SettingsModule.currentShadowColor = attributes.shadowColor;
+            if (attributes.link) SettingsModule.currentLink = attributes.link;
+            document.getElementById('colorPicker').value = SettingsModule.currentStrokeColor;
+            document.getElementById('brushSize').value = SettingsModule.currentStrokeLineWidth;
+            document.getElementById('fillColorPicker').value = SettingsModule.currentFillColor;
+            document.getElementById('strokeLinecap').value = SettingsModule.currentStrokeLinecap;
+            document.getElementById('strokeLinejoin').value = SettingsModule.currentStrokeLinejoin;
+            document.getElementById('strokeDasharray').value = SettingsModule.currentStrokeDasharray;
+            document.getElementById('opacity').value = SettingsModule.currentOpacity;
+            document.getElementById('shadowFilter').value = SettingsModule.currentShadowFilter;
+            document.getElementById('shadowColorPicker').value = SettingsModule.currentShadowColor;
+            document.getElementById('strokeLink').value = SettingsModule.currentLink;
             StateModule.saveState();
           }
         },
@@ -481,7 +511,7 @@
           const stroke = this.currentStrokeIndex !== null ? this.strokeHistory[this.currentStrokeIndex] : null;
           document.getElementById('colorPicker').value = stroke ? stroke.color : SettingsModule.currentStrokeColor;
           document.getElementById('brushSize').value = stroke ? stroke.baseLineWidth : SettingsModule.currentStrokeLineWidth;
-          document.getElementById('fillColorPicker').value = stroke && stroke.fill !== 'none' ? stroke.fill : '#000000';
+          document.getElementById('fillColorPicker').value = stroke ? stroke.fill : SettingsModule.currentFillColor;
           document.getElementById('strokeLinecap').value = stroke ? stroke.strokeLinecap : SettingsModule.currentStrokeLinecap;
           document.getElementById('strokeLinejoin').value = stroke ? stroke.strokeLinejoin : SettingsModule.currentStrokeLinejoin;
           document.getElementById('strokeDasharray').value = stroke ? stroke.strokeDasharray : SettingsModule.currentStrokeDasharray;
@@ -888,6 +918,12 @@
             ctx.setLineDash(SettingsModule.currentStrokeDasharray.split(',').map(Number));
           }
           ctx.globalAlpha = SettingsModule.currentOpacity;
+          if (SettingsModule.currentShadowFilter) {
+            ctx.shadowColor = SettingsModule.currentShadowColor;
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetX = 4;
+            ctx.shadowOffsetY = 4;
+          }
           ctx.stroke(tempPath);
           ctx.restore();
         },
@@ -1121,12 +1157,22 @@
               ctx.setLineDash(strokeInfo.strokeDasharray.split(',').map(Number));
             }
             ctx.globalAlpha = strokeInfo.opacity ?? 1;
+            if (strokeInfo.filter === 'url(#dynamicShadow)') {
+              ctx.shadowColor = strokeInfo.shadowColor || SettingsModule.currentShadowColor;
+              ctx.shadowBlur = 8;
+              ctx.shadowOffsetX = 4;
+              ctx.shadowOffsetY = 4;
+            }
 
             ctx.stroke(strokeInfo.path);
             if (strokeInfo.fill && strokeInfo.fill !== 'none') {
               ctx.fill(strokeInfo.path);
             }
             ctx.restore();
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
           });
           this.highlightSelectedStrokes();
           this.drawSelectionRectangle();
@@ -1352,7 +1398,7 @@
                 const strokeDasharray = pathEl.getAttribute('stroke-dasharray') || '';
                 const opacity = parseFloat(pathEl.getAttribute('opacity') || '1');
                 const filter = pathEl.getAttribute('filter') || '';
-                const shadowColor = SettingsModule.currentShadowColor; // Default shadow color
+                const shadowColor = SettingsModule.currentShadowColor;
 
                 let transform = new DOMMatrix();
                 let transformAttr = pathEl.getAttribute('transform');

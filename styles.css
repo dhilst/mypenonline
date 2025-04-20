@@ -14,8 +14,8 @@ body {
   background-color: #15202B; /* Twitter dark theme */
   cursor: crosshair;
 }
-#controls {
-  position: fixed;
+#controls, #strokeBar {
+  position: relative;
   top: 10px;
   left: 10px;
   z-index: 10;
@@ -27,7 +27,10 @@ body {
   align-items: center;
   gap: 10px;
 }
-#controls button {
+#strokeBar {
+  margin-top: 8px; /* 8px gap from controls */
+}
+#controls button, #strokeBar button {
   background: #D3D8DE;
   color: #15202B;
   border: none;
@@ -38,21 +41,21 @@ body {
   font-weight: 500;
   transition: background 0.2s, transform 0.1s;
 }
-#controls button:hover {
+#controls button:hover, #strokeBar button:hover {
   background: #E8ECEF;
   transform: translateY(-1px);
 }
-#controls button:active {
+#controls button:active, #strokeBar button:active {
   transform: translateY(0);
 }
-#controls label {
+#controls label, #strokeBar label {
   color: #D3D8DE;
   font-size: 14px;
   display: flex;
   align-items: center;
   gap: 5px;
 }
-#controls input[type="color"] {
+#controls input[type="color"], #strokeBar input[type="color"] {
   width: 30px;
   height: 30px;
   padding: 2px;
@@ -60,7 +63,7 @@ body {
   border-radius: 4px;
   cursor: pointer;
 }
-#controls input[type="range"] {
+#controls input[type="range"], #strokeBar input[type="range"] {
   accent-color: #D3D8DE;
 }
 #controls input[type="file"] {
