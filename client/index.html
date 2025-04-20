@@ -183,7 +183,7 @@
            });
             // Add padding if desired
             if (overallBounds) {
-                const padding = 10; // World coordinate padding
+                const padding = 20; // World coordinate padding
                 overallBounds.minX -= padding;
                 overallBounds.minY -= padding;
                 overallBounds.maxX += padding;
@@ -210,6 +210,13 @@
 
         if (e.key.toLowerCase() === 'm') isMKeyPressed = true;
         else if (e.key.toLowerCase() === 'n') isNKeyPressed = true;
+        else if (e.key.toLowerCase() === 'l') {
+          const link = prompt("Link: ");
+          if (!link) return;
+          strokeHistory.filter(s => s.isSelected).forEach(selected => {
+            selected.link = link;
+          });
+        }
         else if (e.key === ' ') { e.preventDefault(); isSpacePressed = true; isSelecting = true; }
         else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undoLastStroke(); }
         else if (e.key >= '1' && e.key <= '9') selectColor(defaultColors[parseInt(e.key) - 1]);
@@ -636,10 +643,13 @@
           const bounds = getDrawingBounds() || { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height }; // Fallback bounds
           const vbX = bounds.minX;
           const vbY = bounds.minY;
-          const vbW = Math.max(1, bounds.maxX - bounds.minX); // Ensure non-zero width/height
-          const vbH = Math.max(1, bounds.maxY - bounds.minY);
+          const vbW = bounds.maxX;
+          const vbH = bounds.maxY;
+          const backgroundColor = "#15202B"; // @TODO: Get this from #drawingCanvas background-color
 
-          let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="100%" height="100%">\n`;
+          let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="100%" height="100%">\n
+<rect x="0" y="0" width="100%" height="100%" fill="${backgroundColor}"/>
+`;
 
           strokeHistory.forEach(strokeInfo => {
               const t = strokeInfo.transform;
@@ -649,7 +659,13 @@
                                  Math.abs(t.e) < 1e-6 && Math.abs(t.f) < 1e-6;
               const transformAttr = isIdentity ? '' : ` transform="matrix(${t.a} ${t.b} ${t.c} ${t.d} ${t.e} ${t.f})"`;
 
-              svgContent += `  <path d="${strokeInfo.svgPath}" stroke="${strokeInfo.color}" stroke-width="${strokeInfo.baseLineWidth}" stroke-linecap="round" stroke-linejoin="round" fill="none"${transformAttr} />\n`;
+              let path = `  <path d="${strokeInfo.svgPath}" stroke="${strokeInfo.color}" stroke-width="${strokeInfo.baseLineWidth}" stroke-linecap="round" stroke-linejoin="round" fill="none"${transformAttr} />\n`;
+
+              if (strokeInfo.link) {
+                path = `<a href="${strokeInfo.link}" target="_blank">${path}</a>\n`;
+              }
+
+              svgContent += path;
           });
 
           svgContent += `</svg>`;
