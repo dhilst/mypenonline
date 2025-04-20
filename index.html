@@ -117,7 +117,7 @@
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-
+      
       // --- Modules ---
       const SettingsModule = {
         defaultColors: ['#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#800080', '#FFA500', '#00FFFF', '#FF00FF'],
@@ -144,7 +144,9 @@
               }
             }
           },
-          ' ': {
+          // @FIXME: I changed ' ' to 's' here to fix a bug in the color picker where
+          //   pressing space invokes the color picker instead drawing the selecting rectagle
+          's': {
             action: (e) => {
               e.preventDefault();
               DrawingModule.isSpacePressed = true;
@@ -157,8 +159,10 @@
               if (!DrawingModule.isDragging && !DrawingModule.isResizing) DrawingModule.redrawCanvas();
             }
           },
+          // @FIXME: I change 'Escape' to 'c' (mnemoic for clear selection) to fix a bug with the color picker
           'Escape': {
             action: (e) => {
+              console.debug(`<${e.key}> invoked @`, this);
               e.preventDefault();
               if (DrawingModule.isDrawingSelection) {
                 DrawingModule.isDrawingSelection = false;
@@ -170,6 +174,7 @@
                 DrawingModule.isDragging = false;
                 DrawingModule.isResizing = false;
                 DrawingModule.redrawCanvas();
+                canvas.focus();
               }
             }
           },
@@ -213,18 +218,24 @@
           const strokeSelect = document.getElementById('strokeSelect');
           const autosaveIntervalInput = document.getElementById('autosaveInterval');
 
+
+          backgroundColorPicker.addEventListener('change', e => {
+            console.debug("backgroundColorPicker change", e);
+            this.backgroundColor = backgroundColorPicker.value;
+            DrawingModule.redrawCanvas();
+            StateModule.saveState();
+          });
+          backgroundColorPicker.addEventListener('blur', e => {
+          });
           colorPicker.addEventListener('change', () => {
             this.currentStrokeColor = colorPicker.value;
             DrawingModule.updateCurrentStroke({ color: this.currentStrokeColor });
           });
+          colorPicker.addEventListener('blur', () => {
+          });
           brushSize.addEventListener('input', () => {
             this.currentStrokeLineWidth = parseFloat(brushSize.value);
             DrawingModule.updateCurrentStroke({ baseLineWidth: this.currentStrokeLineWidth });
-          });
-          backgroundColorPicker.addEventListener('change', () => {
-            this.backgroundColor = backgroundColorPicker.value;
-            DrawingModule.redrawCanvas();
-            StateModule.saveState();
           });
           fillColorPicker.addEventListener('change', () => {
             this.currentFillColor = fillColorPicker.value;
@@ -531,7 +542,9 @@
 
         setupEventListeners() {
           document.addEventListener('keydown', (e) => {
-            if (document.activeElement.tagName === 'INPUT') return;
+            console.debug("keydown", e.key);
+            // @FIXME: The below line caused a bug in the color picker
+            // if (document.activeElement.tagName === 'INPUT') return;
             if (SettingsModule.keybinds[e.key]) {
               SettingsModule.keybinds[e.key].action(e);
             }
@@ -539,8 +552,9 @@
           });
 
           document.addEventListener('keyup', (e) => {
+            console.debug("keyup", e.key);
             if (SettingsModule.keybinds[e.key] && SettingsModule.keybinds[e.key].release) {
-              SettingsModule.keybinds[e.key].release();
+              SettingsModule.keybinds[e.key].release(e);
             }
             this.updateCursor();
           });
