@@ -1,0 +1,1440 @@
+// Declare FileSaver.js saveAs function
+declare function saveAs(blob: Blob, name: string): void;
+
+// Interfaces for stroke and state
+interface Stroke {
+  path: Path2D;
+  svgPath: string;
+  color: string;
+  baseLineWidth: number;
+  fill: string;
+  strokeLinecap: string;
+  strokeLinejoin: string;
+  strokeDasharray: string;
+  opacity: number;
+  filter: string;
+  shadowColor: string;
+  transform: DOMMatrix;
+  isSelected: boolean;
+  originalBounds: Bounds;
+  link: string;
+}
+
+interface Bounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+interface Keybind {
+  action: (e: KeyboardEvent) => void;
+  release?: (e: KeyboardEvent) => void;
+}
+
+interface SettingsState {
+  currentStrokeColor: string;
+  currentStrokeLineWidth: number;
+  currentFillColor: string;
+  currentStrokeLinecap: string;
+  currentStrokeLinejoin: string;
+  currentStrokeDasharray: string;
+  currentOpacity: number;
+  currentShadowFilter: string;
+  currentShadowColor: string;
+  currentLink: string;
+  backgroundColor: string;
+  autosaveInterval: number;
+}
+
+interface DrawingState {
+  strokeHistory: {
+    svgPath: string;
+    color: string;
+    baseLineWidth: number;
+    fill: string;
+    strokeLinecap: string;
+    strokeLinejoin: string;
+    strokeDasharray: string;
+    opacity: number;
+    filter: string;
+    shadowColor: string;
+    transform: { a: number; b: number; c: number; d: number; e: number; f: number };
+    isSelected: boolean;
+    originalBounds: Bounds;
+    link: string;
+  }[];
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  currentStrokeIndex: number | null;
+}
+
+// Get canvas and context
+const canvas = document.getElementById('drawingCanvas') as HTMLCanvasElement;
+const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// --- Modules ---
+const SettingsModule = {
+  defaultColors: ['#000000', '#FFFFFF', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#800080', '#FFA500', '#00FFFF', '#FF00FF'],
+  currentStrokeColor: '#FFFFFF',
+  currentStrokeLineWidth: 5,
+  currentFillColor: 'none',
+  currentStrokeLinecap: 'round',
+  currentStrokeLinejoin: 'round',
+  currentStrokeDasharray: '',
+  currentOpacity: 1,
+  currentShadowFilter: '',
+  currentShadowColor: '#000000',
+  currentLink: '',
+  backgroundColor: '#15202B',
+  autosaveInterval: 10, // seconds
+  keybinds: {
+    'm': { action: () => { DrawingModule.isMKeyPressed = true; }, release: () => { DrawingModule.isMKeyPressed = false; DrawingModule.isPanning = false; } },
+    'n': { action: () => { DrawingModule.isNKeyPressed = true; }, release: () => { DrawingModule.isNKeyPressed = false; DrawingModule.isZooming = false; } },
+    ' ': {
+      action: (e: KeyboardEvent) => {
+        e.preventDefault();
+        DrawingModule.isSpacePressed = true;
+        DrawingModule.isSelecting = true;
+      },
+      release: () => {
+        DrawingModule.isSpacePressed = false;
+        DrawingModule.isSelecting = false;
+        DrawingModule.isDrawingSelection = false;
+        if (!DrawingModule.isDragging && !DrawingModule.isResizing) DrawingModule.redrawCanvas();
+      }
+    },
+    'Escape': {
+      action: (e: KeyboardEvent) => {
+        console.debug(`<${e.key}> invoked @`, this);
+        e.preventDefault();
+        if (DrawingModule.isDrawingSelection) {
+          DrawingModule.isDrawingSelection = false;
+          DrawingModule.redrawCanvas();
+        } else {
+          DrawingModule.updateSelectedStrokes({ isSelected: false });
+          DrawingModule.currentStrokeIndex = null;
+          DrawingModule.updateStrokeBar();
+          DrawingModule.isDragging = false;
+          DrawingModule.isResizing = false;
+          DrawingModule.redrawCanvas();
+          canvas.focus();
+        }
+      }
+    },
+    'Tab': {
+      action: (e: KeyboardEvent) => {
+        e.preventDefault();
+        DrawingModule.cycleSelectedStroke();
+      }
+    },
+    'z': {
+      action: (e: KeyboardEvent) => {
+        if (e.ctrlKey) {
+          e.preventDefault();
+          DrawingModule.undoLastStroke();
+        }
+      }
+    },
+    '0': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[0]) },
+    '1': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[1]) },
+    '2': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[2]) },
+    '3': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[3]) },
+    '4': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[4]) },
+    '5': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[5]) },
+    '6': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[6]) },
+    '7': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[7]) },
+    '8': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[8]) },
+    '9': { action: () => SettingsModule.selectColor(SettingsModule.defaultColors[9]) },
+  } as { [key: string]: Keybind },
+
+  init() {
+    const colorPicker = document.getElementById('colorPicker') as HTMLInputElement;
+    const brushSize = document.getElementById('brushSize') as HTMLInputElement;
+    const backgroundColorPicker = document.getElementById('backgroundColorPicker') as HTMLInputElement;
+    const fillColorPicker = document.getElementById('fillColorPicker') as HTMLSelectElement;
+    const strokeLinecap = document.getElementById('strokeLinecap') as HTMLSelectElement;
+    const strokeLinejoin = document.getElementById('strokeLinejoin') as HTMLSelectElement;
+    const strokeDasharray = document.getElementById('strokeDasharray') as HTMLSelectElement;
+    const opacity = document.getElementById('opacity') as HTMLInputElement;
+    const shadowFilter = document.getElementById('shadowFilter') as HTMLSelectElement;
+    const shadowColorPicker = document.getElementById('shadowColorPicker') as HTMLInputElement;
+    const strokeLink = document.getElementById('strokeLink') as HTMLInputElement;
+    const strokeSelect = document.getElementById('strokeSelect') as HTMLSelectElement;
+    const autosaveIntervalInput = document.getElementById('autosaveInterval') as HTMLInputElement;
+
+    backgroundColorPicker.addEventListener('change', () => {
+      this.backgroundColor = backgroundColorPicker.value;
+      DrawingModule.redrawCanvas();
+      StateModule.saveState();
+    });
+    colorPicker.addEventListener('change', () => {
+      this.currentStrokeColor = colorPicker.value;
+      DrawingModule.updateSelectedStrokes({ color: this.currentStrokeColor });
+    });
+    brushSize.addEventListener('input', () => {
+      this.currentStrokeLineWidth = parseFloat(brushSize.value);
+      DrawingModule.updateSelectedStrokes({ baseLineWidth: this.currentStrokeLineWidth });
+    });
+    fillColorPicker.addEventListener('change', () => {
+      this.currentFillColor = fillColorPicker.value;
+      DrawingModule.updateSelectedStrokes({ fill: this.currentFillColor });
+    });
+    strokeLinecap.addEventListener('change', () => {
+      this.currentStrokeLinecap = strokeLinecap.value;
+      DrawingModule.updateSelectedStrokes({ strokeLinecap: this.currentStrokeLinecap });
+    });
+    strokeLinejoin.addEventListener('change', () => {
+      this.currentStrokeLinejoin = strokeLinejoin.value;
+      DrawingModule.updateSelectedStrokes({ strokeLinejoin: this.currentStrokeLinejoin });
+    });
+    strokeDasharray.addEventListener('change', () => {
+      this.currentStrokeDasharray = strokeDasharray.value;
+      DrawingModule.updateSelectedStrokes({ strokeDasharray: this.currentStrokeDasharray });
+    });
+    opacity.addEventListener('input', () => {
+      this.currentOpacity = parseFloat(opacity.value);
+      DrawingModule.updateSelectedStrokes({ opacity: this.currentOpacity });
+    });
+    shadowFilter.addEventListener('change', () => {
+      this.currentShadowFilter = shadowFilter.value;
+      DrawingModule.updateSelectedStrokes({ filter: this.currentShadowFilter });
+    });
+    shadowColorPicker.addEventListener('change', () => {
+      this.currentShadowColor = shadowColorPicker.value;
+      DrawingModule.updateSelectedStrokes({ shadowColor: this.currentShadowColor });
+      DrawingModule.redrawCanvas();
+    });
+    strokeLink.addEventListener('input', () => {
+      this.currentLink = strokeLink.value.trim();
+      DrawingModule.updateSelectedStrokes({ link: this.currentLink });
+    });
+    strokeSelect.addEventListener('change', () => {
+      const index = parseInt(strokeSelect.value);
+      if (!isNaN(index)) {
+        DrawingModule.currentStrokeIndex = index;
+        DrawingModule.updateStrokeBar();
+        DrawingModule.redrawCanvas();
+      }
+    });
+    autosaveIntervalInput.addEventListener('change', () => {
+      const newInterval = parseInt(autosaveIntervalInput.value);
+      if (newInterval >= 1 && newInterval <= 60) {
+        this.autosaveInterval = newInterval;
+        StateModule.startAutosave();
+        StateModule.saveState();
+      } else {
+        autosaveIntervalInput.value = this.autosaveInterval.toString();
+      }
+    });
+
+    this.currentStrokeColor = colorPicker.value;
+    this.currentStrokeLineWidth = parseFloat(brushSize.value);
+    this.backgroundColor = backgroundColorPicker.value;
+    this.currentFillColor = fillColorPicker.value;
+    this.currentStrokeLinecap = strokeLinecap.value;
+    this.currentStrokeLinejoin = strokeLinejoin.value;
+    this.currentStrokeDasharray = strokeDasharray.value;
+    this.currentOpacity = parseFloat(opacity.value);
+    this.currentShadowFilter = shadowFilter.value;
+    this.currentShadowColor = shadowColorPicker.value;
+    this.currentLink = strokeLink.value;
+    this.autosaveInterval = parseInt(autosaveIntervalInput.value);
+  },
+
+  selectColor(color: string) {
+    (document.getElementById('colorPicker') as HTMLInputElement).value = color;
+    this.currentStrokeColor = color;
+    DrawingModule.updateSelectedStrokes({ color: this.currentStrokeColor });
+  },
+
+  getState(): SettingsState {
+    return {
+      currentStrokeColor: this.currentStrokeColor,
+      currentStrokeLineWidth: this.currentStrokeLineWidth,
+      currentFillColor: this.currentFillColor,
+      currentStrokeLinecap: this.currentStrokeLinecap,
+      currentStrokeLinejoin: this.currentStrokeLinejoin,
+      currentStrokeDasharray: this.currentStrokeDasharray,
+      currentOpacity: this.currentOpacity,
+      currentShadowFilter: this.currentShadowFilter,
+      currentShadowColor: this.currentShadowColor,
+      currentLink: this.currentLink,
+      backgroundColor: this.backgroundColor,
+      autosaveInterval: this.autosaveInterval
+    };
+  },
+
+  setState(state: SettingsState | null) {
+    if (!state) return;
+    this.currentStrokeColor = state.currentStrokeColor || '#FFFFFF';
+    this.currentStrokeLineWidth = state.currentStrokeLineWidth || 5;
+    this.currentFillColor = state.currentFillColor || 'none';
+    this.currentStrokeLinecap = state.currentStrokeLinecap || 'round';
+    this.currentStrokeLinejoin = state.currentStrokeLinejoin || 'round';
+    this.currentStrokeDasharray = state.currentStrokeDasharray || '';
+    this.currentOpacity = state.currentOpacity ?? 1;
+    this.currentShadowFilter = state.currentShadowFilter || '';
+    this.currentShadowColor = state.currentShadowColor || '#000000';
+    this.currentLink = state.currentLink || '';
+    this.backgroundColor = state.backgroundColor || '#15202B';
+    this.autosaveInterval = state.autosaveInterval || 10;
+
+    (document.getElementById('colorPicker') as HTMLInputElement).value = this.currentStrokeColor;
+    (document.getElementById('brushSize') as HTMLInputElement).value = this.currentStrokeLineWidth.toString();
+    (document.getElementById('backgroundColorPicker') as HTMLInputElement).value = this.backgroundColor;
+    (document.getElementById('fillColorPicker') as HTMLSelectElement).value = this.currentFillColor;
+    (document.getElementById('strokeLinecap') as HTMLSelectElement).value = this.currentStrokeLinecap;
+    (document.getElementById('strokeLinejoin') as HTMLSelectElement).value = this.currentStrokeLinejoin;
+    (document.getElementById('strokeDasharray') as HTMLSelectElement).value = this.currentStrokeDasharray;
+    (document.getElementById('opacity') as HTMLInputElement).value = this.currentOpacity.toString();
+    (document.getElementById('shadowFilter') as HTMLSelectElement).value = this.currentShadowFilter;
+    (document.getElementById('shadowColorPicker') as HTMLInputElement).value = this.currentShadowColor;
+    (document.getElementById('strokeLink') as HTMLInputElement).value = this.currentLink;
+    (document.getElementById('autosaveInterval') as HTMLInputElement).value = this.autosaveInterval.toString();
+  }
+};
+
+const DrawingModule = {
+  // State Variables
+  isPanning: false,
+  isZooming: false,
+  isErasing: false,
+  isSelecting: false,
+  isDrawingSelection: false,
+  isDragging: false,
+  isResizing: false,
+  isMKeyPressed: false,
+  isNKeyPressed: false,
+  isSpacePressed: false,
+  lastPanX: 0,
+  lastPanY: 0,
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+  minScale: 0.1,
+  maxScale: 10,
+  selectStartX: 0,
+  selectStartY: 0,
+  selectEndX: 0,
+  selectEndY: 0,
+  dragStartX: 0,
+  dragStartY: 0,
+  resizeStartBounds: null as Bounds | null,
+  HANDLE_SIZE: 20,
+  HITBOX_SIZE: 30,
+  ERASE_RADIUS: 15,
+  isDrawing: false,
+  currentStrokeCommands: [] as [string, number, number][],
+  currentStrokeSVG: "",
+  strokeHistory: [] as Stroke[],
+  currentStrokeIndex: null as number | null,
+
+  init() {
+    this.updateCanvasStyles();
+    this.setupEventListeners();
+    this.redrawCanvas();
+  },
+
+  updateCanvasStyles() {
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+  },
+
+  addStroke(stroke: Stroke) {
+    this.strokeHistory.push(stroke);
+  },
+
+  removeStroke(index: number) {
+    this.strokeHistory.splice(index, 1);
+    if (this.currentStrokeIndex === index) {
+      this.currentStrokeIndex = null;
+    } else if (this.currentStrokeIndex !== null && this.currentStrokeIndex > index) {
+      this.currentStrokeIndex--;
+    }
+    this.updateStrokeBar();
+  },
+
+  updateSelectedStrokes(attributes: Partial<Stroke>) {
+    let modified = false;
+    this.strokeHistory.forEach(stroke => {
+      if (stroke.isSelected) {
+        Object.assign(stroke, attributes);
+        modified = true;
+      }
+    });
+    if (modified) {
+      this.redrawCanvas();
+      this.updateStrokeBar();
+      StateModule.saveState();
+    }
+  },
+
+  updateCurrentStroke(attributes: Partial<Stroke>) {
+    if (this.currentStrokeIndex !== null) {
+      const stroke = this.strokeHistory[this.currentStrokeIndex];
+      if (stroke && stroke.isSelected) {
+        Object.assign(stroke, attributes);
+        this.redrawCanvas();
+        this.updateStrokeBar();
+        StateModule.saveState();
+      }
+    } else {
+      if (attributes.color) SettingsModule.currentStrokeColor = attributes.color;
+      if (attributes.baseLineWidth) SettingsModule.currentStrokeLineWidth = attributes.baseLineWidth;
+      if (attributes.fill) SettingsModule.currentFillColor = attributes.fill;
+      if (attributes.strokeLinecap) SettingsModule.currentStrokeLinecap = attributes.strokeLinecap;
+      if (attributes.strokeLinejoin) SettingsModule.currentStrokeLinejoin = attributes.strokeLinejoin;
+      if (attributes.strokeDasharray) SettingsModule.currentStrokeDasharray = attributes.strokeDasharray;
+      if (attributes.opacity) SettingsModule.currentOpacity = attributes.opacity;
+      if (attributes.filter) SettingsModule.currentShadowFilter = attributes.filter;
+      if (attributes.shadowColor) SettingsModule.currentShadowColor = attributes.shadowColor;
+      if (attributes.link) SettingsModule.currentLink = attributes.link;
+      (document.getElementById('colorPicker') as HTMLInputElement).value = SettingsModule.currentStrokeColor;
+      (document.getElementById('brushSize') as HTMLInputElement).value = SettingsModule.currentStrokeLineWidth.toString();
+      (document.getElementById('fillColorPicker') as HTMLSelectElement).value = SettingsModule.currentFillColor;
+      (document.getElementById('strokeLinecap') as HTMLSelectElement).value = SettingsModule.currentStrokeLinecap;
+      (document.getElementById('strokeLinejoin') as HTMLSelectElement).value = SettingsModule.currentStrokeLinejoin;
+      (document.getElementById('strokeDasharray') as HTMLSelectElement).value = SettingsModule.currentStrokeDasharray;
+      (document.getElementById('opacity') as HTMLInputElement).value = SettingsModule.currentOpacity.toString();
+      (document.getElementById('shadowFilter') as HTMLSelectElement).value = SettingsModule.currentShadowFilter;
+      (document.getElementById('shadowColorPicker') as HTMLInputElement).value = SettingsModule.currentShadowColor;
+      (document.getElementById('strokeLink') as HTMLInputElement).value = SettingsModule.currentLink;
+      StateModule.saveState();
+    }
+  },
+
+  clearStrokes() {
+    this.strokeHistory = [];
+    this.currentStrokeIndex = null;
+  },
+
+  setStrokeHistory(strokes: Stroke[]) {
+    this.strokeHistory = strokes;
+    this.currentStrokeIndex = null;
+  },
+
+  cycleSelectedStroke() {
+    const selectedIndices = this.strokeHistory
+      .map((stroke, index) => (stroke.isSelected ? index : -1))
+      .filter(index => index !== -1);
+    if (selectedIndices.length === 0) return;
+
+    if (this.currentStrokeIndex === null || !selectedIndices.includes(this.currentStrokeIndex)) {
+      this.currentStrokeIndex = selectedIndices[0];
+    } else {
+      const currentPos = selectedIndices.indexOf(this.currentStrokeIndex);
+      this.currentStrokeIndex = selectedIndices[(currentPos + 1) % selectedIndices.length];
+    }
+    this.updateStrokeBar();
+    this.redrawCanvas();
+  },
+
+  updateStrokeBar() {
+    const strokeSelect = document.getElementById('strokeSelect') as HTMLSelectElement;
+    const selectedIndices = this.strokeHistory
+      .map((stroke, index) => (stroke.isSelected ? index : -1))
+      .filter(index => index !== -1);
+
+    strokeSelect.innerHTML = '';
+    if (selectedIndices.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.text = 'No strokes selected';
+      strokeSelect.appendChild(option);
+      this.currentStrokeIndex = null;
+    } else {
+      selectedIndices.forEach(index => {
+        const option = document.createElement('option');
+        option.value = index.toString();
+        option.text = `Stroke ${index + 1}`;
+        strokeSelect.appendChild(option);
+      });
+      if (this.currentStrokeIndex === null || !selectedIndices.includes(this.currentStrokeIndex)) {
+        this.currentStrokeIndex = selectedIndices[0];
+      }
+      strokeSelect.value = this.currentStrokeIndex?.toString() || '';
+    }
+
+    const stroke = this.currentStrokeIndex !== null ? this.strokeHistory[this.currentStrokeIndex] : null;
+    (document.getElementById('colorPicker') as HTMLInputElement).value = stroke ? stroke.color : SettingsModule.currentStrokeColor;
+    (document.getElementById('brushSize') as HTMLInputElement).value = (stroke ? stroke.baseLineWidth : SettingsModule.currentStrokeLineWidth).toString();
+    (document.getElementById('fillColorPicker') as HTMLSelectElement).value = stroke ? stroke.fill : SettingsModule.currentFillColor;
+    (document.getElementById('strokeLinecap') as HTMLSelectElement).value = stroke ? stroke.strokeLinecap : SettingsModule.currentStrokeLinecap;
+    (document.getElementById('strokeLinejoin') as HTMLSelectElement).value = stroke ? stroke.strokeLinejoin : SettingsModule.currentStrokeLinejoin;
+    (document.getElementById('strokeDasharray') as HTMLSelectElement).value = stroke ? stroke.strokeDasharray : SettingsModule.currentStrokeDasharray;
+    (document.getElementById('opacity') as HTMLInputElement).value = (stroke ? stroke.opacity : SettingsModule.currentOpacity).toString();
+    (document.getElementById('shadowFilter') as HTMLSelectElement).value = stroke ? stroke.filter : SettingsModule.currentShadowFilter;
+    (document.getElementById('shadowColorPicker') as HTMLInputElement).value = stroke ? stroke.shadowColor : SettingsModule.currentShadowColor;
+    (document.getElementById('strokeLink') as HTMLInputElement).value = stroke ? stroke.link || '' : SettingsModule.currentLink;
+
+    this.updateStrokeBarVisibility();
+  },
+
+  updateStrokeBarVisibility() {
+    const strokeBar = document.getElementById('strokeBar') as HTMLDivElement;
+    strokeBar.style.display = this.strokeHistory.some(s => s.isSelected) ? 'block' : 'none';
+  },
+
+  setupEventListeners() {
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+      console.debug("keydown", e.key);
+      if (SettingsModule.keybinds[e.key]) {
+        SettingsModule.keybinds[e.key].action(e);
+      }
+      this.updateCursor();
+    });
+
+    document.addEventListener('keyup', (e: KeyboardEvent) => {
+      console.debug("keyup", e.key);
+      if (SettingsModule.keybinds[e.key] && SettingsModule.keybinds[e.key].release) {
+        SettingsModule.keybinds[e.key].release!(e);
+      }
+      this.updateCursor();
+    });
+
+    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+      e.preventDefault();
+      canvas.focus();
+      const mouseX = e.offsetX;
+      const mouseY = e.offsetY;
+      const worldX = (mouseX - this.offsetX) / this.scale;
+      const worldY = (mouseY - this.offsetY) / this.scale;
+      const currentSelectionBounds = this.getSelectionBounds();
+
+      if (this.isSelecting && e.button === 0) {
+        if (currentSelectionBounds && this.isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+          this.isResizing = true;
+          this.resizeStartBounds = currentSelectionBounds;
+          this.dragStartX = (this.resizeStartBounds.minX + this.resizeStartBounds.maxX) / 2;
+          this.dragStartY = (this.resizeStartBounds.minY + this.resizeStartBounds.maxY) / 2;
+        } else if (currentSelectionBounds && this.isPointNearSelectedStrokes(worldX, worldY)) {
+          this.isDragging = true;
+          this.dragStartX = worldX;
+          this.dragStartY = worldY;
+        } else {
+          this.isDrawingSelection = true;
+          this.selectStartX = mouseX;
+          this.selectStartY = mouseY;
+          this.selectEndX = mouseX;
+          this.selectEndY = mouseY;
+          this.updateSelectedStrokes({ isSelected: false });
+          this.currentStrokeIndex = null;
+          this.updateStrokeBar();
+        }
+      } else if (!this.isSelecting && e.button === 0 && this.strokeHistory.some(s => s.isSelected)) {
+        if (currentSelectionBounds && this.isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+          this.isResizing = true;
+          this.resizeStartBounds = currentSelectionBounds;
+          this.dragStartX = (this.resizeStartBounds.minX + this.resizeStartBounds.maxX) / 2;
+          this.dragStartY = (this.resizeStartBounds.minY + this.resizeStartBounds.maxY) / 2;
+        } else if (currentSelectionBounds && this.isPointNearSelectedStrokes(worldX, worldY)) {
+          this.isDragging = true;
+          this.dragStartX = worldX;
+          this.dragStartY = worldY;
+        }
+      }
+
+      if (!this.isDragging && !this.isResizing && !this.isDrawingSelection) {
+        if (e.button === 0 && this.isMKeyPressed) {
+          this.isPanning = true;
+          this.lastPanX = e.clientX;
+          this.lastPanY = e.clientY;
+        } else if (e.button === 0 && this.isNKeyPressed) {
+          this.isZooming = true;
+          this.lastPanY = e.clientY;
+        } else if (e.button === 0 && !this.isSpacePressed) {
+          if (!currentSelectionBounds || !this.isPointNearSelectedStrokes(worldX, worldY)) {
+            this.isDrawing = true;
+            this.currentStrokeCommands = [['M', worldX, worldY]];
+            this.currentStrokeSVG = `M ${worldX.toFixed(2)} ${worldY.toFixed(2)}`;
+            this.drawCurrentStrokeSegment();
+          }
+        } else if (e.button === 2) {
+          this.isErasing = true;
+          this.eraseStroke(worldX, worldY);
+        }
+      }
+      this.updateCursor(mouseX, mouseY);
+    });
+
+    canvas.addEventListener('pointermove', (e: PointerEvent) => {
+      const mouseX = e.offsetX;
+      const mouseY = e.offsetY;
+      const worldX = (mouseX - this.offsetX) / this.scale;
+      const worldY = (mouseY - this.offsetY) / this.scale;
+
+      if (this.isPanning) {
+        const deltaX = e.clientX - this.lastPanX;
+        const deltaY = e.clientY - this.lastPanY;
+        this.offsetX += deltaX;
+        this.offsetY += deltaY;
+        this.lastPanX = e.clientX;
+        this.lastPanY = e.clientY;
+        this.redrawCanvas();
+      } else if (this.isZooming) {
+        const deltaY = e.clientY - this.lastPanY;
+        const zoomFactor = 1 - deltaY * 0.005;
+        const newScale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * zoomFactor));
+        const worldXBefore = (mouseX - this.offsetX) / this.scale;
+        const worldYBefore = (mouseY - this.offsetY) / this.scale;
+        this.scale = newScale;
+        this.offsetX = mouseX - worldXBefore * this.scale;
+        this.offsetY = mouseY - worldYBefore * this.scale;
+        this.lastPanY = e.clientY;
+        this.redrawCanvas();
+      } else if (this.isDrawingSelection) {
+        this.selectEndX = mouseX;
+        this.selectEndY = mouseY;
+        this.redrawCanvas();
+      } else if (this.isDragging) {
+        const deltaX = worldX - this.dragStartX;
+        const deltaY = worldY - this.dragStartY;
+        const translationMatrix = new DOMMatrix().translate(deltaX, deltaY);
+        this.strokeHistory.forEach(strokeInfo => {
+          if (strokeInfo.isSelected) strokeInfo.transform = translationMatrix.multiply(strokeInfo.transform);
+        });
+        this.dragStartX = worldX;
+        this.dragStartY = worldY;
+        this.redrawCanvas();
+      } else if (this.isResizing && this.resizeStartBounds) {
+        const currentCenterX = this.dragStartX;
+        const currentCenterY = this.dragStartY;
+        const initialHandleX = this.resizeStartBounds.maxX;
+        const initialHandleY = this.resizeStartBounds.maxY;
+        const distInitialX = initialHandleX - currentCenterX;
+        const distInitialY = initialHandleY - currentCenterY;
+        const distCurrentX = worldX - currentCenterX;
+        const distCurrentY = worldY - currentCenterY;
+
+        let scaleFactor = 1;
+        if (Math.abs(distInitialX) > Math.abs(distInitialY)) {
+          scaleFactor = Math.abs(distInitialX) < 1e-6 ? 1 : distCurrentX / distInitialX;
+        } else {
+          scaleFactor = Math.abs(distInitialY) < 1e-6 ? 1 : distCurrentY / distInitialY;
+        }
+        scaleFactor = Math.max(0.01, scaleFactor);
+
+        const scaleMatrix = new DOMMatrix()
+          .translate(currentCenterX, currentCenterY)
+          .scale(scaleFactor)
+          .translate(-currentCenterX, -currentCenterY);
+
+        this.strokeHistory.forEach(strokeInfo => {
+          if (strokeInfo.isSelected) {
+            strokeInfo.transform = scaleMatrix.multiply(strokeInfo.transform);
+          }
+        });
+
+        this.resizeStartBounds = this.transformBounds(scaleMatrix, this.resizeStartBounds);
+        this.redrawCanvas();
+      } else if (this.isDrawing) {
+        const lastCmd = this.currentStrokeCommands[this.currentStrokeCommands.length - 1];
+        if (Math.hypot(worldX - lastCmd[1], worldY - lastCmd[2]) > 0.5) {
+          this.currentStrokeCommands.push(['L', worldX, worldY]);
+          this.currentStrokeSVG += ` L ${worldX.toFixed(2)} ${worldY.toFixed(2)}`;
+          this.drawCurrentStrokeSegment();
+        }
+      } else if (this.isErasing) {
+        this.eraseStroke(worldX, worldY);
+      } else {
+        this.updateCursor(mouseX, mouseY);
+      }
+    });
+
+    canvas.addEventListener('pointerup', (e: PointerEvent) => {
+      if (this.isDrawing) {
+        this.isDrawing = false;
+        if (this.currentStrokeCommands.length > 1) {
+          const finalSvgData = this.createSvgPathString(this.currentStrokeCommands);
+          const newPath = new Path2D(finalSvgData);
+          const bounds = this.computeBoundsFromPoints(
+            this.currentStrokeCommands.map(cmd => ({ x: cmd[1], y: cmd[2] })),
+            SettingsModule.currentStrokeLineWidth
+          );
+          this.addStroke({
+            path: newPath,
+            svgPath: finalSvgData,
+            color: SettingsModule.currentStrokeColor,
+            baseLineWidth: SettingsModule.currentStrokeLineWidth,
+            fill: SettingsModule.currentFillColor,
+            strokeLinecap: SettingsModule.currentStrokeLinecap,
+            strokeLinejoin: SettingsModule.currentStrokeLinejoin,
+            strokeDasharray: SettingsModule.currentStrokeDasharray,
+            opacity: SettingsModule.currentOpacity,
+            filter: SettingsModule.currentShadowFilter,
+            shadowColor: SettingsModule.currentShadowColor,
+            transform: new DOMMatrix(),
+            isSelected: false,
+            originalBounds: bounds,
+            link: SettingsModule.currentLink
+          });
+          StateModule.saveState();
+        }
+        this.currentStrokeCommands = [];
+        this.currentStrokeSVG = "";
+        this.redrawCanvas();
+      }
+      if (this.isErasing) this.isErasing = false;
+      if (this.isDrawingSelection) {
+        this.isDrawingSelection = false;
+        this.selectStrokesInRectangle();
+        this.updateStrokeBar();
+        this.redrawCanvas();
+      }
+      if (this.isDragging) this.isDragging = false;
+      if (this.isResizing) this.isResizing = false;
+      this.isPanning = false;
+      this.isZooming = false;
+      this.updateCursor(e.offsetX, e.offsetY);
+    });
+
+    canvas.addEventListener('pointerleave', () => {
+      if (this.isDrawing) {
+        this.isDrawing = false;
+        if (this.currentStrokeCommands.length > 1) {
+          const finalSvgData = this.createSvgPathString(this.currentStrokeCommands);
+          const newPath = new Path2D(finalSvgData);
+          const bounds = this.computeBoundsFromPoints(
+            this.currentStrokeCommands.map(cmd => ({ x: cmd[1], y: cmd[2] })),
+            SettingsModule.currentStrokeLineWidth
+          );
+          this.addStroke({
+            path: newPath,
+            svgPath: finalSvgData,
+            color: SettingsModule.currentStrokeColor,
+            baseLineWidth: SettingsModule.currentStrokeLineWidth,
+            fill: SettingsModule.currentFillColor,
+            strokeLinecap: SettingsModule.currentStrokeLinecap,
+            strokeLinejoin: SettingsModule.currentStrokeLinejoin,
+            strokeDasharray: SettingsModule.currentStrokeDasharray,
+            opacity: SettingsModule.currentOpacity,
+            filter: SettingsModule.currentShadowFilter,
+            shadowColor: SettingsModule.currentShadowColor,
+            transform: new DOMMatrix(),
+            isSelected: false,
+            originalBounds: bounds,
+            link: SettingsModule.currentLink
+          });
+          StateModule.saveState();
+        }
+        this.currentStrokeCommands = [];
+        this.currentStrokeSVG = "";
+        this.redrawCanvas();
+      }
+      this.isPanning = false;
+      this.isZooming = false;
+      this.isErasing = false;
+      this.isDrawingSelection = false;
+      this.isDragging = false;
+      this.isResizing = false;
+      this.updateCursor();
+    });
+
+    canvas.addEventListener('contextmenu', (e: Event) => e.preventDefault());
+  },
+
+  computeBoundsFromPoints(points: { x: number; y: number }[], lineWidth: number): Bounds {
+    if (!points || points.length === 0) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    let minX = points[0].x, maxX = points[0].x, minY = points[0].y, maxY = points[0].y;
+    const margin = lineWidth / 2;
+    points.forEach(p => {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    });
+    return { minX: minX - margin, maxX: maxX + margin, minY: minY - margin, maxY: maxY + margin };
+  },
+
+  parseSvgPathToPoints(d: string): { x: number; y: number }[] {
+    const points: { x: number; y: number }[] = [];
+    const tokens = d.match(/[MLZmlz]|[+-]?\d*\.?\d+(?:[eE][+-]?\d+)?/g) || [];
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token.match(/[ML]/i)) {
+        const x = parseFloat(tokens[i + 1]);
+        const y = parseFloat(tokens[i + 2]);
+        if (!isNaN(x) && !isNaN(y)) {
+          points.push({ x, y });
+          i += 2;
+        }
+      }
+    }
+    return points;
+  },
+
+  transformPoint(matrix: DOMMatrix, x: number, y: number): DOMPoint {
+    const p = new DOMPoint(x, y);
+    try {
+      return matrix.transformPoint(p);
+    } catch (e) {
+      console.error("Matrix transformation error:", e);
+      return p;
+    }
+  },
+
+  transformBounds(matrix: DOMMatrix, bounds: Bounds): Bounds {
+    try {
+      const p1 = this.transformPoint(matrix, bounds.minX, bounds.minY);
+      const p2 = this.transformPoint(matrix, bounds.maxX, bounds.minY);
+      const p3 = this.transformPoint(matrix, bounds.maxX, bounds.maxY);
+      const p4 = this.transformPoint(matrix, bounds.minX, bounds.maxY);
+      return {
+        minX: Math.min(p1.x, p2.x, p3.x, p4.x),
+        maxX: Math.max(p1.x, p2.x, p3.x, p4.x),
+        minY: Math.min(p1.y, p2.y, p3.y, p4.y),
+        maxY: Math.max(p1.y, p2.y, p3.y, p4.y)
+      };
+    } catch (e) {
+      console.error("Error transforming bounds", e);
+      return bounds;
+    }
+  },
+
+  getSelectionBounds(): Bounds | null {
+    let overallBounds: Bounds | null = null;
+    this.strokeHistory.forEach(strokeInfo => {
+      if (strokeInfo.isSelected && strokeInfo.originalBounds) {
+        const currentBounds = this.transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+        if (currentBounds) {
+          if (!overallBounds) {
+            overallBounds = { ...currentBounds };
+          } else {
+            overallBounds.minX = Math.min(overallBounds.minX, currentBounds.minX);
+            overallBounds.maxX = Math.max(overallBounds.maxX, currentBounds.maxX);
+            overallBounds.minY = Math.min(overallBounds.minY, currentBounds.minY);
+            overallBounds.maxY = Math.max(overallBounds.maxY, currentBounds.maxY);
+          }
+        }
+      }
+    });
+    return overallBounds;
+  },
+
+  getDrawingBounds(): Bounds {
+    // Compute overallBounds directly from the loop
+    const overallBounds: Bounds = this.strokeHistory.reduce<Bounds>((acc, strokeInfo) => {
+      if (strokeInfo.originalBounds) {
+        const currentBounds = this.transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+        if (currentBounds) {
+          // If this is the first valid bounds, return it as the initial accumulator
+          if (!acc.minX && !acc.maxX && !acc.minY && !acc.maxY) {
+            return { ...currentBounds };
+          }
+          // Otherwise, merge the bounds
+          return {
+            minX: Math.min(acc.minX, currentBounds.minX),
+            maxX: Math.max(acc.maxX, currentBounds.maxX),
+            minY: Math.min(acc.minY, currentBounds.minY),
+            maxY: Math.max(acc.maxY, currentBounds.maxY)
+          };
+        }
+      }
+      // If no valid bounds, return the accumulator unchanged
+      return acc;
+    }, { minX: 0, minY: 0, maxX: 0, maxY: 0 }); // Initial value to ensure Bounds type
+
+    // If overallBounds is still the initial value, return default bounds
+    if (overallBounds.minX === 0 && overallBounds.maxX === 0 && overallBounds.minY === 0 && overallBounds.maxY === 0) {
+      return { minX: 0, minY: 0, maxX: canvas.width, maxY: canvas.height };
+    }
+
+    // Apply padding and return the final bounds
+    const padding = 20;
+    return {
+      minX: overallBounds.minX - padding,
+      maxX: overallBounds.maxX + padding,
+      minY: overallBounds.minY - padding,
+      maxY: overallBounds.maxY + padding
+    };
+  },
+
+  createSvgPathString(commands: [string, number, number][]): string {
+    const format = (num: number) => parseFloat(num.toString()).toFixed(2);
+    return commands.map(cmd => {
+      if (cmd.length === 3) return `${cmd[0]} ${format(cmd[1])} ${format(cmd[2])}`;
+      return cmd.join(' ');
+    }).join(' ');
+  },
+
+  drawCurrentStrokeSegment() {
+    if (!this.currentStrokeSVG) return;
+    const tempPath = new Path2D(this.currentStrokeSVG);
+    ctx.save();
+    ctx.translate(this.offsetX, this.offsetY);
+    ctx.scale(this.scale, this.scale);
+    ctx.strokeStyle = SettingsModule.currentStrokeColor;
+    ctx.lineWidth = SettingsModule.currentStrokeLineWidth;
+    ctx.lineCap = SettingsModule.currentStrokeLinecap as CanvasLineCap;
+    ctx.lineJoin = SettingsModule.currentStrokeLinejoin as CanvasLineJoin;
+    if (SettingsModule.currentStrokeDasharray) {
+      ctx.setLineDash(SettingsModule.currentStrokeDasharray.split(',').map(Number));
+    }
+    ctx.globalAlpha = SettingsModule.currentOpacity;
+    if (SettingsModule.currentShadowFilter) {
+      ctx.shadowColor = SettingsModule.currentShadowColor;
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetX = 4;
+      ctx.shadowOffsetY = 4;
+    }
+    ctx.stroke(tempPath);
+    ctx.restore();
+  },
+
+  eraseStroke(worldX: number, worldY: number) {
+    let erased = false;
+    for (let i = this.strokeHistory.length - 1; i >= 0; i--) {
+      const strokeInfo = this.strokeHistory[i];
+      try {
+        const inverseMatrix = strokeInfo.transform.inverse();
+        const localPoint = this.transformPoint(inverseMatrix, worldX, worldY);
+        const t = strokeInfo.transform;
+        const approxScale = (Math.sqrt(t.a ** 2 + t.c ** 2) + Math.sqrt(t.b ** 2 + t.d ** 2)) / 2 || 1;
+        const hitWidth = (strokeInfo.baseLineWidth / 2 + this.ERASE_RADIUS) / (this.scale * approxScale);
+
+        ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1;
+        ctx.lineCap = strokeInfo.strokeLinecap as CanvasLineCap || 'round';
+        ctx.lineJoin = strokeInfo.strokeLinejoin as CanvasLineJoin || 'round';
+        if (ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y)) {
+          this.removeStroke(i);
+          erased = true;
+        }
+      } catch (error) {
+        console.error("Error during erase hit test:", error);
+      }
+    }
+    if (erased) {
+      this.redrawCanvas();
+      StateModule.saveState();
+    }
+  },
+
+  selectStrokesInRectangle() {
+    const rectMinX = Math.min(this.selectStartX, this.selectEndX);
+    const rectMaxX = Math.max(this.selectStartX, this.selectEndX);
+    const rectMinY = Math.min(this.selectStartY, this.selectEndY);
+    const rectMaxY = Math.max(this.selectStartY, this.selectEndY);
+
+    this.strokeHistory.forEach(strokeInfo => {
+      if (strokeInfo.originalBounds) {
+        const currentBounds = this.transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+        if (currentBounds) {
+          const screenBoundsMinX = currentBounds.minX * this.scale + this.offsetX;
+          const screenBoundsMaxX = currentBounds.maxX * this.scale + this.offsetX;
+          const screenBoundsMinY = currentBounds.minY * this.scale + this.offsetY;
+          const screenBoundsMaxY = currentBounds.maxY * this.scale + this.offsetY;
+
+          if (
+            screenBoundsMaxX >= rectMinX &&
+            screenBoundsMinX <= rectMaxX &&
+            screenBoundsMaxY >= rectMinY &&
+            screenBoundsMinY <= rectMaxY
+          ) {
+            strokeInfo.isSelected = true;
+          }
+        }
+      }
+    });
+  },
+
+  isPointNearSelectedStrokes(worldX: number, worldY: number): boolean {
+    return this.strokeHistory.some(strokeInfo => {
+      if (!strokeInfo.isSelected) return false;
+      try {
+        const inverseMatrix = strokeInfo.transform.inverse();
+        const localPoint = this.transformPoint(inverseMatrix, worldX, worldY);
+        const t = strokeInfo.transform;
+        const approxScale = (Math.sqrt(t.a ** 2 + t.c ** 2) + Math.sqrt(t.b ** 2 + t.d ** 2)) / 2 || 1;
+        const hitWidth = (strokeInfo.baseLineWidth / 2 + this.HITBOX_SIZE / 2) / (this.scale * approxScale);
+
+        ctx.lineWidth = hitWidth > 0 ? hitWidth : 0.1;
+        ctx.lineCap = strokeInfo.strokeLinecap as CanvasLineCap || 'round';
+        ctx.lineJoin = strokeInfo.strokeLinejoin as CanvasLineJoin || 'round';
+        return ctx.isPointInStroke(strokeInfo.path, localPoint.x, localPoint.y);
+      } catch (e) {
+        console.warn("Matrix non-invertible?", e);
+        return false;
+      }
+    });
+  },
+
+  isPointNearResizeHandle(mouseX: number, mouseY: number, selectionBounds: Bounds): boolean {
+    if (!selectionBounds) return false;
+    const handleScreenX = selectionBounds.maxX * this.scale + this.offsetX;
+    const handleScreenY = selectionBounds.maxY * this.scale + this.offsetY;
+    const dx = mouseX - handleScreenX;
+    const dy = mouseY - handleScreenY;
+    return Math.sqrt(dx * dx + dy * dy) < this.HITBOX_SIZE / 2;
+  },
+
+  drawSelectionRectangle() {
+    if (this.isDrawingSelection) {
+      ctx.save();
+      ctx.strokeStyle = '#FFF';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(
+        this.selectStartX,
+        this.selectStartY,
+        this.selectEndX - this.selectStartX,
+        this.selectEndY - this.selectStartY
+      );
+      ctx.restore();
+    }
+  },
+
+  highlightSelectedStrokes() {
+    const selectionBounds = this.getSelectionBounds();
+    if (selectionBounds) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      const screenMinX = selectionBounds.minX * this.scale + this.offsetX;
+      const screenMaxX = selectionBounds.maxX * this.scale + this.offsetX;
+      const screenMinY = selectionBounds.minY * this.scale + this.offsetY;
+      const screenMaxY = selectionBounds.maxY * this.scale + this.offsetY;
+      ctx.strokeRect(screenMinX, screenMinY, screenMaxX - screenMinX, screenMaxY - screenMinY);
+      ctx.restore();
+    }
+
+    if (this.currentStrokeIndex !== null) {
+      const strokeInfo = this.strokeHistory[this.currentStrokeIndex];
+      if (strokeInfo && strokeInfo.isSelected && strokeInfo.originalBounds) {
+        const bounds = this.transformBounds(strokeInfo.transform, strokeInfo.originalBounds);
+        if (bounds) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255, 255, 153, 0.8)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          const screenMinX = bounds.minX * this.scale + this.offsetX;
+          const screenMaxX = bounds.maxX * this.scale + this.offsetX;
+          const screenMinY = bounds.minY * this.scale + this.offsetY;
+          const screenMaxY = bounds.maxY * this.scale + this.offsetY;
+          ctx.strokeRect(screenMinX, screenMinY, screenMaxX - screenMinX, screenMaxY - screenMinY);
+          ctx.restore();
+        }
+      }
+    }
+  },
+
+  drawHandles() {
+    const selectionBounds = this.getSelectionBounds();
+    if (
+      selectionBounds &&
+      this.strokeHistory.some(s => s.isSelected) &&
+      (!this.isSpacePressed || this.isDragging || this.isResizing)
+    ) {
+      ctx.save();
+      const handleScreenX = selectionBounds.maxX * this.scale + this.offsetX;
+      const handleScreenY = selectionBounds.maxY * this.scale + this.offsetY;
+      ctx.fillStyle = '#FFF';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.rect(
+        handleScreenX - this.HANDLE_SIZE / 2,
+        handleScreenY - this.HANDLE_SIZE / 2,
+        this.HANDLE_SIZE,
+        this.HANDLE_SIZE
+      );
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+
+  updateCursor(mouseX?: number, mouseY?: number) {
+    let cursor = 'crosshair';
+    const anySelected = this.strokeHistory.some(s => s.isSelected);
+    const currentSelectionBounds = anySelected ? this.getSelectionBounds() : null;
+
+    if (
+      this.isPanning ||
+      (this.isMKeyPressed && !this.isDrawing && !this.isResizing && !this.isDrawingSelection)
+    ) {
+      cursor = 'move';
+    } else if (
+      this.isZooming ||
+      (this.isNKeyPressed && !this.isDrawing && !this.isResizing && !this.isDrawingSelection)
+    ) {
+      cursor = 'ns-resize';
+    } else if (this.isErasing) {
+      cursor = 'crosshair';
+    } else if (this.isDragging) {
+      cursor = 'move';
+    } else if (this.isResizing) {
+      cursor = 'se-resize';
+    } else if (this.isSelecting && !this.isDrawingSelection && !this.isDragging && !this.isResizing) {
+      if (currentSelectionBounds && mouseX !== undefined && mouseY !== undefined && this.isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+        cursor = 'se-resize';
+      } else if (
+        currentSelectionBounds &&
+        mouseX !== undefined &&
+        mouseY !== undefined &&
+        this.isPointNearSelectedStrokes((mouseX - this.offsetX) / this.scale, (mouseY - this.offsetY) / this.scale)
+      ) {
+        cursor = 'move';
+      } else {
+        cursor = 'crosshair';
+      }
+    } else if (anySelected && !this.isSpacePressed && mouseX !== undefined && mouseY !== undefined) {
+      if (currentSelectionBounds && this.isPointNearResizeHandle(mouseX, mouseY, currentSelectionBounds)) {
+        cursor = 'se-resize';
+      } else if (
+        currentSelectionBounds &&
+        this.isPointNearSelectedStrokes((mouseX - this.offsetX) / this.scale, (mouseY - this.offsetY) / this.scale)
+      ) {
+        cursor = 'move';
+      }
+    }
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+  },
+
+  redrawCanvas() {
+    ctx.fillStyle = SettingsModule.backgroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.strokeHistory.forEach(strokeInfo => {
+      ctx.save();
+      ctx.translate(this.offsetX, this.offsetY);
+      ctx.scale(this.scale, this.scale);
+      const t = strokeInfo.transform;
+      ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
+
+      ctx.strokeStyle = strokeInfo.color;
+      ctx.lineWidth = strokeInfo.baseLineWidth;
+      ctx.lineCap = strokeInfo.strokeLinecap as CanvasLineCap || 'round';
+      ctx.lineJoin = strokeInfo.strokeLinejoin as CanvasLineJoin || 'round';
+      ctx.fillStyle = strokeInfo.fill || 'none';
+      if (strokeInfo.strokeDasharray) {
+        ctx.setLineDash(strokeInfo.strokeDasharray.split(',').map(Number));
+      }
+      ctx.globalAlpha = strokeInfo.opacity ?? 1;
+      if (strokeInfo.filter === 'url(#dynamicShadow)') {
+        ctx.shadowColor = strokeInfo.shadowColor || SettingsModule.currentShadowColor;
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetX = 4;
+        ctx.shadowOffsetY = 4;
+      }
+
+      ctx.stroke(strokeInfo.path);
+      if (strokeInfo.fill && strokeInfo.fill !== 'none') {
+        ctx.fill(strokeInfo.path);
+      }
+      ctx.restore();
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    });
+    this.highlightSelectedStrokes();
+    this.drawSelectionRectangle();
+    this.drawHandles();
+    this.updateStrokeBarVisibility();
+  },
+
+  undoLastStroke() {
+    if (this.strokeHistory.length > 0) {
+      this.removeStroke(this.strokeHistory.length - 1);
+      this.redrawCanvas();
+      StateModule.saveState();
+    }
+  },
+
+  clearCanvas() {
+    this.clearStrokes();
+    this.currentStrokeCommands = [];
+    this.currentStrokeSVG = "";
+    this.offsetX = 0;
+    this.offsetY = 0;
+    this.scale = 1;
+    ctx.fillStyle = SettingsModule.backgroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.updateStrokeBar();
+    StateModule.saveState();
+  },
+
+  getState(): DrawingState {
+    return {
+      strokeHistory: this.strokeHistory.map(stroke => ({
+        svgPath: stroke.svgPath,
+        color: stroke.color,
+        baseLineWidth: stroke.baseLineWidth,
+        fill: stroke.fill,
+        strokeLinecap: stroke.strokeLinecap,
+        strokeLinejoin: stroke.strokeLinejoin,
+        strokeDasharray: stroke.strokeDasharray,
+        opacity: stroke.opacity,
+        filter: stroke.filter,
+        shadowColor: stroke.shadowColor,
+        transform: { a: stroke.transform.a, b: stroke.transform.b, c: stroke.transform.c, d: stroke.transform.d, e: stroke.transform.e, f: stroke.transform.f },
+        isSelected: stroke.isSelected,
+        originalBounds: stroke.originalBounds,
+        link: stroke.link
+      })),
+      offsetX: this.offsetX,
+      offsetY: this.offsetY,
+      scale: this.scale,
+      currentStrokeIndex: this.currentStrokeIndex
+    };
+  },
+
+  setState(state: DrawingState | null) {
+    if (!state) return;
+    this.setStrokeHistory(state.strokeHistory.map(stroke => {
+      const path = new Path2D(stroke.svgPath);
+      const transform = new DOMMatrix([
+        stroke.transform.a,
+        stroke.transform.b,
+        stroke.transform.c,
+        stroke.transform.d,
+        stroke.transform.e,
+        stroke.transform.f
+      ]);
+      return {
+        path,
+        svgPath: stroke.svgPath,
+        color: stroke.color,
+        baseLineWidth: stroke.baseLineWidth,
+        fill: stroke.fill,
+        strokeLinecap: stroke.strokeLinecap,
+        strokeLinejoin: stroke.strokeLinejoin,
+        strokeDasharray: stroke.strokeDasharray,
+        opacity: stroke.opacity,
+        filter: stroke.filter,
+        shadowColor: stroke.shadowColor,
+        transform,
+        isSelected: stroke.isSelected,
+        originalBounds: stroke.originalBounds,
+        link: stroke.link
+      };
+    }));
+    this.offsetX = state.offsetX || 0;
+    this.offsetY = state.offsetY || 0;
+    this.scale = state.scale || 1;
+    this.currentStrokeIndex = state.currentStrokeIndex ?? null;
+    this.updateStrokeBar();
+    this.redrawCanvas();
+  }
+};
+
+const StateModule = {
+  autosaveTimer: null as number | null,
+
+  init() {
+    (document.getElementById('fileInput') as HTMLInputElement).addEventListener('change', () => this.loadCanvas());
+    this.loadStateFromStorage();
+    this.startAutosave();
+  },
+
+  startAutosave() {
+    if (this.autosaveTimer) clearInterval(this.autosaveTimer);
+    this.autosaveTimer = setInterval(() => this.saveState(), SettingsModule.autosaveInterval * 1000);
+  },
+
+  saveState() {
+    const state = {
+      settings: SettingsModule.getState(),
+      drawing: DrawingModule.getState()
+    };
+    localStorage.setItem('drawingState', JSON.stringify(state));
+  },
+
+  loadStateFromStorage() {
+    const savedState = localStorage.getItem('drawingState');
+    if (savedState) {
+      try {
+        const state = JSON.parse(savedState);
+        SettingsModule.setState(state.settings);
+        DrawingModule.setState(state.drawing);
+      } catch (e) {
+        console.error('Error loading state from storage:', e);
+      }
+    }
+  },
+
+  saveCanvas() {
+    const bounds = DrawingModule.getDrawingBounds();
+    if (!bounds) {
+      throw Error(`Null bounds`);
+    }
+    const vbX = bounds.minX;
+    const vbY = bounds.minY;
+    const vbW = bounds.maxX - bounds.minX;
+    const vbH = bounds.maxY - bounds.minY;
+
+    let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="100%" height="100%">\n`;
+    svgContent += `<defs>\n`;
+    svgContent += `  <filter id="dynamicShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="4" dy="4" stdDeviation="4" flood-color="${SettingsModule.currentShadowColor}" flood-opacity="0.5"/></filter>\n`;
+    svgContent += `</defs>\n`;
+    svgContent += `<rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${SettingsModule.backgroundColor}"/>\n`;
+
+    DrawingModule.strokeHistory.forEach(strokeInfo => {
+      const t = strokeInfo.transform;
+      const isIdentity =
+        Math.abs(t.a - 1) < 1e-6 &&
+        Math.abs(t.d - 1) < 1e-6 &&
+        Math.abs(t.b) < 1e-6 &&
+        Math.abs(t.c) < 1e-6 &&
+        Math.abs(t.e) < 1e-6 &&
+        Math.abs(t.f) < 1e-6;
+      const transformAttr = isIdentity ? '' : ` transform="matrix(${t.a} ${t.b} ${t.c} ${t.d} ${t.e} ${t.f})"`;
+      const fillAttr = strokeInfo.fill && strokeInfo.fill !== 'none' ? ` fill="${strokeInfo.fill}"` : ' fill="none"';
+      const strokeLinecapAttr = strokeInfo.strokeLinecap ? ` stroke-linecap="${strokeInfo.strokeLinecap}"` : '';
+      const strokeLinejoinAttr = strokeInfo.strokeLinejoin ? ` stroke-linejoin="${strokeInfo.strokeLinejoin}"` : '';
+      const strokeDasharrayAttr = strokeInfo.strokeDasharray ? ` stroke-dasharray="${strokeInfo.strokeDasharray}"` : '';
+      const opacityAttr = strokeInfo.opacity !== undefined && strokeInfo.opacity !== 1 ? ` opacity="${strokeInfo.opacity}"` : '';
+      const filterAttr = strokeInfo.filter && strokeInfo.shadowColor ? ` filter="url(#dynamicShadow)"` : '';
+
+      let path = `  <path d="${strokeInfo.svgPath}" stroke="${strokeInfo.color}" stroke-width="${strokeInfo.baseLineWidth}"${fillAttr}${strokeLinecapAttr}${strokeLinejoinAttr}${strokeDasharrayAttr}${opacityAttr}${filterAttr}${transformAttr}/>\n`;
+
+      if (strokeInfo.link) {
+        path = `<a href="${strokeInfo.link}" target="_blank">${path}</a>\n`;
+      }
+
+      svgContent += path;
+    });
+
+    svgContent += `</svg>`;
+
+    let filename = prompt("File name: ", "drawing") || "drawing.svg";
+    if (!filename.toLowerCase().endsWith(".svg")) filename += ".svg";
+    const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+    saveAs(blob, filename);
+  },
+
+  loadCanvas() {
+    const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/svg+xml') && !file.name.toLowerCase().endsWith('.svg')) {
+      alert('Please select an SVG file (.svg)');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const svgText = e.target?.result as string;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svgText, 'image/svg+xml');
+
+        const parserError = doc.querySelector('parsererror');
+        if (parserError) throw new Error(`SVG parsing error: ${parserError.textContent}`);
+
+        let pathElements = doc.querySelectorAll('svg > path, svg > a > path');
+        if (pathElements.length === 0) {
+          pathElements = doc.querySelectorAll('svg > g > path, svg > g > a > path');
+        }
+
+        const rect = doc.querySelector('svg > rect');
+        let backgroundColor = SettingsModule.backgroundColor;
+        if (rect && rect.getAttribute('fill')) {
+          backgroundColor = rect.getAttribute('fill')!;
+        }
+
+        DrawingModule.clearCanvas();
+        SettingsModule.backgroundColor = backgroundColor;
+        (document.getElementById('backgroundColorPicker') as HTMLInputElement).value = backgroundColor;
+
+        const strokes = Array.from(pathElements).map(pathEl => {
+          const d = pathEl.getAttribute('d');
+          if (!d) return null;
+
+          const path = new Path2D(d);
+          const color = pathEl.getAttribute('stroke') || '#FFFFFF';
+          const lineWidth = parseFloat(pathEl.getAttribute('stroke-width') || '1');
+          const fill = pathEl.getAttribute('fill') || 'none';
+          const strokeLinecap = pathEl.getAttribute('stroke-linecap') || 'round';
+          const strokeLinejoin = pathEl.getAttribute('stroke-linejoin') || 'round';
+          const strokeDasharray = pathEl.getAttribute('stroke-dasharray') || '';
+          const opacity = parseFloat(pathEl.getAttribute('opacity') || '1');
+          const filter = pathEl.getAttribute('filter') || '';
+          const shadowColor = SettingsModule.currentShadowColor;
+
+          let transform = new DOMMatrix();
+          let transformAttr = pathEl.getAttribute('transform');
+          const parent = pathEl.parentNode as SVGElement | null;
+          if (!transformAttr && parent?.tagName === 'a') {
+            transformAttr = parent.getAttribute('transform') || '';
+          }
+          if (transformAttr) {
+            const matrixValues = transformAttr.match(/matrix\(([^)]+)\)/);
+            if (matrixValues && matrixValues[1]) {
+              const nums = matrixValues[1].split(/[\s,]+/).map(Number);
+              if (nums.length === 6 && nums.every(n => !isNaN(n))) {
+                transform = new DOMMatrix(nums);
+              }
+            }
+          }
+
+          const points = DrawingModule.parseSvgPathToPoints(d);
+          const originalBounds =
+            points.length > 0
+              ? DrawingModule.computeBoundsFromPoints(points, lineWidth)
+              : { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+
+          let link = null;
+          if (parent?.tagName === 'a') {
+            link = parent.getAttribute('href') || null;
+          }
+
+          return {
+            path,
+            svgPath: d,
+            color,
+            baseLineWidth: lineWidth,
+            fill,
+            strokeLinecap,
+            strokeLinejoin,
+            strokeDasharray,
+            opacity,
+            filter,
+            shadowColor,
+            transform,
+            isSelected: false,
+            originalBounds,
+            link
+          };
+        }).filter((stroke): stroke is Stroke => stroke !== null);
+
+        DrawingModule.setStrokeHistory(strokes);
+        DrawingModule.offsetX = 0;
+        DrawingModule.offsetY = 0;
+        DrawingModule.scale = 1;
+        DrawingModule.redrawCanvas();
+        StateModule.saveState();
+      } catch (err) {
+        console.error('Error loading or parsing SVG:', err);
+        alert(`Failed to load SVG: ${(err as Error).message}`);
+        DrawingModule.clearCanvas();
+      }
+    };
+    reader.onerror = () => {
+      console.error('Error reading file:', reader.error);
+      alert('Failed to read the file.');
+    };
+    reader.readAsText(file);
+    fileInput.value = '';
+  }
+};
+
+// Export toggleHelp to be accessible globally
+export function toggleHelp() {
+  const helpPanel = document.getElementById('helpPanel') as HTMLDivElement;
+  helpPanel.style.display = helpPanel.style.display === 'block' ? 'none' : 'block';
+}
+
+// Expose modules to global scope for HTML event handlers
+(window as any).DrawingModule = DrawingModule;
+(window as any).SettingsModule = SettingsModule;
+(window as any).StateModule = StateModule;
+
+// Initialize
+SettingsModule.init();
+DrawingModule.init();
+StateModule.init();
